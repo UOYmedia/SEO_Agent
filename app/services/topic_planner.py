@@ -1,0 +1,109 @@
+"""
+Topic cluster planner powered by Claude.
+Turns keyword research data into a pillar + supporting article plan.
+"""
+import json
+import re
+from datetime import datetime
+
+import anthropic
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.models.keyword import TopicCluster, TopicClusterStatus
+from app.services.keyword_analyzer import KeywordAnalyzer
+
+
+class TopicPlanner:
+    def __init__(self):
+        self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self.analyzer = KeywordAnalyzer()
+
+    def _build_prompt(self, keyword: str, paa: list[str], related: list[str]) -> str:
+        return f"""You are an SEO strategist. Create a comprehensive topic cluster for the seed keyword.
+
+Seed keyword: {keyword}
+
+People Also Ask:
+{chr(10).join(f'- {q}' for q in paa) or '(none)'}
+
+Related searches:
+{chr(10).join(f'- {r}' for r in related) or '(none)'}
+
+Return ONLY valid JSON (no markdown, no explanation):
+{{
+  "cluster_name": "short descriptive name",
+  "pillar": {{
+    "title": "complete pillar article title",
+    "slug": "url-friendly-slug",
+    "focus_keyword": "{keyword}",
+    "meta_description": "155 char meta description",
+    "outline": ["H2: Section 1", "H2: Section 2", "H2: Section 3", "H2: FAQ"]
+  }},
+  "supporting_articles": [
+    {{
+      "title": "supporting article title",
+      "slug": "url-friendly-slug",
+      "focus_keyword": "long-tail keyword",
+      "target_question": "the PAA question this targets",
+      "meta_description": "155 char meta description",
+      "outline": ["H2: Section 1", "H2: Section 2", "H2: FAQ"]
+    }}
+  ]
+}}
+
+Generate 5-7 supporting articles targeting the PAA questions and related searches."""
+
+    def _parse_cluster(self, text: str) -> dict:
+        """Extract JSON from Claude response."""
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if not match:
+            raise ValueError("No JSON found in Claude response")
+        return json.loads(match.group())
+
+    async def plan(
+        self,
+        seed_keyword: str,
+        country: str = "us",
+        language: str = "en",
+        db: Session = None,
+    ) -> dict:
+        """Research keyword → plan topic cluster → save to DB."""
+        # 1. Keyword research
+        research = await self.analyzer.research(seed_keyword, country, language)
+
+        # 2. Claude generates cluster plan
+        message = self.client.messages.create(
+            model=settings.ANTHROPIC_MODEL,
+            max_tokens=2500,
+            messages=[
+                {
+                    "role": "user",
+                    "content": self._build_prompt(
+                        seed_keyword,
+                        research["people_also_ask"],
+                        research["related_searches"],
+                    ),
+                }
+            ],
+        )
+
+        cluster_data = self._parse_cluster(message.content[0].text)
+        cluster_data["seed_keyword"] = seed_keyword
+        cluster_data["research"] = research
+
+        # 3. Save to DB
+        if db:
+            cluster = TopicCluster(
+                seed_keyword=seed_keyword,
+                cluster_name=cluster_data.get("cluster_name", seed_keyword),
+                description=json.dumps(cluster_data.get("pillar", {})),
+                questions=research["people_also_ask"],
+                status=TopicClusterStatus.PLANNED,
+            )
+            db.add(cluster)
+            db.commit()
+            db.refresh(cluster)
+            cluster_data["id"] = cluster.id
+
+        return cluster_data

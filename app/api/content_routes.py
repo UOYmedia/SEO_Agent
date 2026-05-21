@@ -1,0 +1,160 @@
+import re
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models.keyword import TopicCluster
+from app.schemas.content import (
+    GenerateArticleRequest,
+    GeneratedArticleOut,
+    KeywordResearchOut,
+    KeywordResearchRequest,
+    TopicPlanRequest,
+)
+from app.services.content_writer import ContentWriter
+from app.services.keyword_analyzer import KeywordAnalyzer
+from app.services.topic_planner import TopicPlanner
+
+research_router = APIRouter(prefix="/api/v1/research", tags=["keyword-research"])
+generate_router = APIRouter(prefix="/api/v1/generate", tags=["content-generation"])
+topics_router = APIRouter(prefix="/api/v1/topics", tags=["topics"])
+
+
+# ── Keyword Research ──────────────────────────────────────────────────────────
+
+@research_router.post("/", response_model=KeywordResearchOut)
+async def research_keyword(body: KeywordResearchRequest):
+    """
+    Research a keyword: returns People Also Ask, related searches, top SERP results.
+    Use this before planning a topic cluster or generating an article.
+    """
+    analyzer = KeywordAnalyzer()
+    result = await analyzer.research(body.keyword, body.country, body.language)
+    return result
+
+
+# ── Topic Planning ────────────────────────────────────────────────────────────
+
+@topics_router.post("/plan")
+async def plan_topic_cluster(body: TopicPlanRequest, db: Session = Depends(get_db)):
+    """
+    Research keyword → Claude generates a full topic cluster plan:
+    1 pillar article + 5-7 supporting articles with outlines.
+    Saves the cluster to DB for tracking.
+    """
+    planner = TopicPlanner()
+    cluster = await planner.plan(body.seed_keyword, body.country, body.language, db=db)
+    return cluster
+
+
+@topics_router.get("/")
+def list_topic_clusters(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """List all planned topic clusters."""
+    clusters = (
+        db.query(TopicCluster)
+        .order_by(TopicCluster.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+    return clusters
+
+
+@topics_router.get("/{cluster_id}")
+def get_topic_cluster(cluster_id: int, db: Session = Depends(get_db)):
+    cluster = db.query(TopicCluster).filter(TopicCluster.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Topic cluster not found")
+    return cluster
+
+
+# ── Content Generation ────────────────────────────────────────────────────────
+
+@generate_router.post("/article")
+async def generate_article(body: GenerateArticleRequest, db: Session = Depends(get_db)):
+    """
+    Generate a full SEO article using Claude.
+
+    - Automatically finds related existing posts for internal linking
+    - Injects external authority links from SERP data (if paa provided)
+    - Saves as DRAFT in DB (does not publish to Shopify yet)
+    - Returns full content + SEO meta + DALL-E image_prompt
+    """
+    writer = ContentWriter()
+
+    # Fetch external refs for the focus keyword if Serper is configured
+    external_refs = []
+    try:
+        analyzer = KeywordAnalyzer()
+        research = await analyzer.research(body.focus_keyword)
+        external_refs = research.get("top_results", [])
+        paa = research.get("people_also_ask", []) + body.paa_questions
+    except Exception:
+        paa = body.paa_questions
+
+    # Generate slug from title
+    slug = re.sub(r"[^a-z0-9]+", "-", body.title.lower()).strip("-")
+
+    result = await writer.write(
+        title=body.title,
+        focus_keyword=body.focus_keyword,
+        outline=body.outline,
+        paa_questions=paa,
+        external_refs=external_refs,
+        language=body.language,
+        tone=body.tone,
+        word_count=body.word_count,
+        db=db,
+        exclude_slug=slug,
+    )
+
+    # Save draft to DB
+    post = writer.save_draft(
+        db=db,
+        title=body.title,
+        slug=slug,
+        focus_keyword=body.focus_keyword,
+        result=result,
+        platform=body.platform,
+        channel_id=body.blog_channel_id,
+        cluster_id=body.cluster_id,
+    )
+
+    return {
+        "id": post.id,
+        "title": post.title,
+        "slug": post.slug,
+        "seo_title": post.seo_title,
+        "seo_description": post.seo_description,
+        "tags": post.tags,
+        "image_prompt": result["image_prompt"],
+        "platform_url": post.platform_url,
+        "status": post.status,
+        "source": post.source,
+        "internal_links_count": len(result["internal_links"]),
+        "usage": result["usage"],
+        "content_preview": result["content_html"][:500] + "...",
+    }
+
+
+@generate_router.get("/article/{post_id}/content")
+def get_article_content(post_id: int, db: Session = Depends(get_db)):
+    """Get full HTML content of a generated article."""
+    from app.models.blog_post import BlogPost
+    post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return {
+        "id": post.id,
+        "title": post.title,
+        "content_html": post.content_html,
+        "seo_title": post.seo_title,
+        "seo_description": post.seo_description,
+        "tags": post.tags,
+        "status": post.status,
+    }
