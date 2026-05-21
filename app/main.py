@@ -1,15 +1,22 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.init_routes import blog_router, router as init_router
 from app.database import create_tables
-from app.api.init_routes import router as init_router, blog_router
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    create_tables()
+    try:
+        create_tables()
+        logger.info("Database tables ready")
+    except Exception as e:
+        logger.warning(f"DB init warning (non-fatal): {e}")
     yield
 
 
