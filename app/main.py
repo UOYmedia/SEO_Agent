@@ -20,6 +20,7 @@ from app.models import shopify_store as _    # ensure table is registered
 from app.models import user as _u            # ensure user tables are registered
 from app.models import brand_profile as _bp  # ensure brand_profiles table is registered
 from app.models import article_feedback as _af  # ensure article_feedback table is registered
+from app.models import article_edit_history as _aeh  # ensure article_edit_history table is registered
 from app.models import knowledge_item as _ki       # ensure knowledge_items table is registered
 from app.models import crawl_job as _cj            # ensure crawl_jobs table is registered
 from app.models import system_settings as _ss      # ensure system_settings table is registered

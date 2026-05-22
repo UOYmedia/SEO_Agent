@@ -510,7 +510,17 @@ function _renderViewPost(id, p) {
       <textarea id="fb-improve" rows="2" placeholder="Improvement notes for future articles (the agent learns from this)…"></textarea>
       <button class="btn btn-secondary btn-sm mt-2" onclick="submitFeedback(${id})">Send Feedback</button>
       <div id="fb-status" class="text-xs text-gray-400 mt-1"></div>
+    </div>
+
+    <div class="mt-4 border-t pt-4">
+      <div class="flex justify-between items-center mb-2">
+        <div class="text-sm font-semibold text-gray-700">🕓 History</div>
+        <button class="text-xs text-indigo-500 hover:underline" onclick="loadArticleHistory(${id})">↻ Refresh</button>
+      </div>
+      <div id="history-list" class="text-xs text-gray-500">${skeletons(2)}</div>
     </div>`
+
+  loadArticleHistory(id)
 
   document.getElementById('modal-footer').innerHTML = `
     ${p.status === 'draft' ? `
@@ -663,7 +673,74 @@ async function submitFeedback(postId) {
     document.getElementById('fb-status').textContent = '✅ Feedback saved! The agent will apply these improvements to future articles.'
     document.getElementById('fb-status').className = 'text-xs text-green-600 mt-1'
     _fbRating = 0
+    loadArticleHistory(postId)
   } catch(e) { toast('Failed to save feedback: ' + e.message, 'error') }
+}
+
+// ─────────────────── History timeline ────────────────────────
+async function loadArticleHistory(postId) {
+  const box = document.getElementById('history-list')
+  if (!box) return
+  try {
+    const items = await GET(`/api/v1/generate/article/${postId}/history`)
+    if (!items.length) {
+      box.innerHTML = `<div class="py-3 text-center text-gray-400">No edits or feedback yet.</div>`
+      return
+    }
+    box.innerHTML = items.map((it, i) => it.type === 'feedback'
+      ? renderHistoryFeedback(it)
+      : renderHistoryEdit(it, i)
+    ).join('')
+  } catch(e) {
+    box.innerHTML = `<div class="text-red-500 py-2">Error: ${esc(e.message)}</div>`
+  }
+}
+
+function renderHistoryFeedback(it) {
+  const stars = '★'.repeat(it.rating) + '☆'.repeat(5 - it.rating)
+  return `
+    <div class="border-l-2 border-amber-300 pl-3 py-2 mb-2 bg-amber-50/40 rounded-r">
+      <div class="flex justify-between items-center">
+        <div class="text-amber-600 font-medium">${stars} <span class="text-gray-600 ml-1">Feedback</span></div>
+        <div class="text-[10px] text-gray-400">${fmtTime(it.created_at)}${it.user ? ' · ' + esc(it.user) : ''}</div>
+      </div>
+      ${it.feedback_text     ? `<div class="mt-1 text-gray-700">${esc(it.feedback_text)}</div>` : ''}
+      ${it.improvement_notes ? `<div class="mt-1 text-gray-500 italic">💡 ${esc(it.improvement_notes)}</div>` : ''}
+    </div>`
+}
+
+function renderHistoryEdit(it, i) {
+  const metaRows = []
+  if (it.title_before !== null && it.title_after !== null)
+    metaRows.push(`<div><span class="text-gray-400">Title:</span> <s class="text-red-500">${esc(it.title_before||'—')}</s> → <span class="text-green-700">${esc(it.title_after||'—')}</span></div>`)
+  if (it.seo_title_before !== null && it.seo_title_after !== null)
+    metaRows.push(`<div><span class="text-gray-400">SEO Title:</span> <s class="text-red-500">${esc(it.seo_title_before||'—')}</s> → <span class="text-green-700">${esc(it.seo_title_after||'—')}</span></div>`)
+  if (it.seo_description_before !== null && it.seo_description_after !== null)
+    metaRows.push(`<div><span class="text-gray-400">Meta:</span> <s class="text-red-500">${esc(it.seo_description_before||'—')}</s> → <span class="text-green-700">${esc(it.seo_description_after||'—')}</span></div>`)
+  if (it.tags_before !== null && it.tags_after !== null)
+    metaRows.push(`<div><span class="text-gray-400">Tags:</span> <s class="text-red-500">${esc((it.tags_before||[]).join(', '))}</s> → <span class="text-green-700">${esc((it.tags_after||[]).join(', '))}</span></div>`)
+  const hasDiff = !!it.content_diff
+  return `
+    <div class="border-l-2 border-indigo-300 pl-3 py-2 mb-2 bg-indigo-50/40 rounded-r">
+      <div class="flex justify-between items-center">
+        <div class="text-indigo-600 font-medium">✏️ Edit · ${esc(it.summary || '(no summary)')}</div>
+        <div class="text-[10px] text-gray-400">${fmtTime(it.created_at)}${it.user ? ' · ' + esc(it.user) : ''}</div>
+      </div>
+      ${metaRows.length ? `<div class="mt-1 space-y-0.5">${metaRows.join('')}</div>` : ''}
+      ${hasDiff ? `
+        <button class="mt-1 text-[11px] text-indigo-500 hover:underline" onclick="this.nextElementSibling.classList.toggle('hidden')">
+          Show content diff (+${it.lines_added}/-${it.lines_removed})
+        </button>
+        <pre class="hidden mt-1 text-[11px] bg-white border rounded p-2 max-h-60 overflow-auto whitespace-pre-wrap">${esc(it.content_diff)}</pre>
+      ` : ''}
+    </div>`
+}
+
+function fmtTime(iso) {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString()
+  } catch { return iso || '' }
 }
 
 // ─────────────────── Publish modal ────────────────────────────
