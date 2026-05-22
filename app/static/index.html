@@ -493,6 +493,7 @@ async function viewPost(id) {
 
 function _renderViewPost(id, p) {
   document.getElementById('modal-title').textContent = p.title
+  const isDraft = p.status === 'draft'
   document.getElementById('modal-body').innerHTML = `
     <div class="flex gap-2 flex-wrap mb-3">${statusBadge(p.status)}</div>
     <div class="text-xs bg-gray-50 rounded-lg p-3 space-y-1 mb-3" id="meta-box">
@@ -500,6 +501,7 @@ function _renderViewPost(id, p) {
       <div><span class="text-gray-400">Meta:</span> ${esc(p.seo_description||'—')}</div>
       <div><span class="text-gray-400">Tags:</span> ${(p.tags||[]).join(', ')||'—'}</div>
     </div>
+    <div id="image-section" class="mb-3">${renderFeaturedImage(id, p, isDraft)}</div>
     <div class="border border-gray-200 rounded-xl overflow-hidden">
       <iframe id="preview-frame" class="w-full" style="height:380px" frameborder="0" sandbox="allow-same-origin allow-scripts"></iframe>
     </div>`
@@ -576,6 +578,7 @@ async function editPost(id) {
         <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Tags <span class="text-gray-400 font-normal">(comma-separated)</span></label>
         <input id="ed-tags" class="input mt-1" value="${esc((p.tags||[]).join(', '))}">
       </div>
+      <div id="image-section">${renderFeaturedImage(id, p, true)}</div>
       <div>
         <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Content HTML</label>
         <textarea id="ed-content" rows="14" class="mt-1" style="font-family:monospace;font-size:12px">${esc(p.content_html||'')}</textarea>
@@ -765,11 +768,72 @@ function fmtTime(iso) {
   } catch { return iso || '' }
 }
 
+// ─────────────────── Featured image ──────────────────────────
+function renderFeaturedImage(postId, p, canEdit) {
+  const url = p.featured_image_url
+  const prompt = p.image_prompt || ''
+  const imgHtml = url
+    ? `<img src="${esc(url)}" alt="${esc(p.title)}"
+         class="w-full rounded-xl border border-gray-200 object-cover" style="max-height:280px">`
+    : `<div class="w-full rounded-xl border border-dashed border-gray-300 bg-gray-50 text-gray-400 text-sm flex items-center justify-center" style="height:140px">
+         No featured image yet${canEdit ? ' — click "Generate image" below' : ''}
+       </div>`
+  return `
+    <div class="text-sm font-semibold text-gray-700 mb-2">🖼 Featured Image</div>
+    ${imgHtml}
+    ${canEdit ? `
+      <details class="mt-2">
+        <summary class="text-xs text-indigo-500 cursor-pointer hover:underline">
+          ${url ? '🎨 Regenerate image' : '🎨 Generate image'} — edit prompt
+        </summary>
+        <div class="mt-2 space-y-2">
+          <textarea id="img-prompt-${postId}" rows="3" class="text-xs"
+            placeholder="DALL·E prompt — describe the banner you want">${esc(prompt)}</textarea>
+          <button class="btn btn-secondary btn-sm" onclick="doRegenerateImage(${postId})" id="img-gen-btn-${postId}">
+            ${url ? '🔄 Regenerate' : '🎨 Generate'}
+          </button>
+          <div id="img-status-${postId}" class="text-xs text-gray-400"></div>
+        </div>
+      </details>
+    ` : ''}`
+}
+
+async function doRegenerateImage(postId) {
+  const ta = document.getElementById(`img-prompt-${postId}`)
+  const btn = document.getElementById(`img-gen-btn-${postId}`)
+  const status = document.getElementById(`img-status-${postId}`)
+  const prompt = ta?.value.trim() || ''
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Generating…'
+  status.textContent = 'Calling DALL·E 3 — ~10–20 seconds'
+  try {
+    const r = await POST(`/api/v1/generate/article/${postId}/regenerate-image`, {
+      slot: 'featured',
+      prompt: prompt || null,
+      size: '1536x1024',
+    })
+    // Re-render the image section in place using the latest post payload
+    const fresh = await GET(`/api/v1/generate/article/${postId}/content`)
+    const section = document.getElementById('image-section')
+    if (section) section.innerHTML = renderFeaturedImage(postId, fresh, true)
+    toast('✅ Image updated', 'success')
+  } catch(e) {
+    btn.disabled = false; btn.innerHTML = '🔄 Regenerate'
+    status.textContent = '❌ ' + e.message
+  }
+}
+
 // ─────────────────── Publish modal ────────────────────────────
-function openPublishModal(postId, title) {
+async function openPublishModal(postId, title) {
   const chOpts = S.channels.map(c =>
     `<option value="${esc(c.platform_id)}">${esc(c.title)} (ID: ${c.platform_id})</option>`).join('')
   const savedBlogId = localStorage.getItem(`seo_pref_blogid_${S.currentShop}`) || ''
+
+  // Check if the draft already has a featured image
+  let hasImage = false
+  try {
+    const p = await GET(`/api/v1/generate/article/${postId}/content`)
+    hasImage = !!p.featured_image_url
+  } catch {}
 
   openModal(`Publish: ${title}`, `
     <div class="space-y-4">
@@ -784,9 +848,10 @@ function openPublishModal(postId, title) {
         <label>Author</label>
         <input type="text" id="pub-author" value="${esc(S.user?.name || 'SEO Agent')}">
       </div>
-      <div class="flex items-center gap-3 py-1">
-        <input type="checkbox" id="pub-image" checked class="w-4 h-4 rounded accent-indigo-600">
-        <label for="pub-image" class="!mb-0 cursor-pointer">Generate DALL·E 3 banner image</label>
+      <div class="flex items-center gap-2 text-xs ${hasImage ? 'text-green-700 bg-green-50 border-green-200' : 'text-amber-700 bg-amber-50 border-amber-200'} border rounded-lg px-3 py-2">
+        ${hasImage
+          ? '🖼 Featured image is set — will be uploaded to Shopify.'
+          : '⚠️ No featured image set. The article will publish without one. Add an image in the draft view first.'}
       </div>
       <div class="flex items-center gap-3 py-1">
         <input type="checkbox" id="pub-live" checked class="w-4 h-4 rounded accent-indigo-600">
@@ -801,20 +866,17 @@ async function doPublish(postId) {
   const blogId = parseInt(document.getElementById('pub-blog-id').value)
   if (!blogId) { toast('Enter a Shopify Blog ID', 'error'); return }
 
-  const genImage  = document.getElementById('pub-image').checked
   const published = document.getElementById('pub-live').checked
   const author    = document.getElementById('pub-author').value
 
   const btn = document.getElementById('do-pub-btn')
   btn.disabled = true
-  btn.innerHTML = `<span class="spinner"></span> ${genImage ? 'Generating image…' : 'Publishing…'}`
+  btn.innerHTML = `<span class="spinner"></span> Publishing…`
 
   try {
-    const endpoint = genImage ? `/api/v1/publish/${postId}/full` : `/api/v1/publish/${postId}/shopify`
-    const body = genImage
-      ? { blog_id: blogId, shop_domain: S.currentShop || null, author, published, generate_image: true }
-      : { blog_id: blogId, shop_domain: S.currentShop || null, author, published }
-    const r = await POST(endpoint, body)
+    const r = await POST(`/api/v1/publish/${postId}/shopify`, {
+      blog_id: blogId, shop_domain: S.currentShop || null, author, published,
+    })
     localStorage.setItem(`seo_pref_blogid_${S.currentShop}`, blogId)
     closeModal()
     toast(`✅ Published! ${r.platform_url || ''}`, 'success')

@@ -216,6 +216,7 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
 async def regenerate_image(
     post_id: int,
     body: "_RegenerateImageBody",
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Generate a new image for a draft post. slot='featured' or a custom label."""
@@ -225,6 +226,8 @@ async def regenerate_image(
     post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
     if not post:
         raise HTTPException(404, "Post not found")
+    if post.shop_domain:
+        check_store_scope(user, post.shop_domain, "write", db)
 
     prompt = body.prompt or post.image_prompt or f"Professional blog banner for: {post.title}"
     size = body.size if body.size in {"1024x1024", "1536x1024", "1024x1536"} else "1536x1024"
@@ -234,6 +237,8 @@ async def regenerate_image(
 
     if not body.slot or body.slot == "featured":
         post.featured_image_url = url
+        post.featured_image_alt = post.title
+        post.image_prompt = prompt
     else:
         extra = list(post.extra_images or [])
         existing = next((e for e in extra if e.get("label") == body.slot), None)
