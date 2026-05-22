@@ -48,14 +48,37 @@ def get_store_token(shop_domain: str, db: Session) -> str:
     return settings.SHOPIFY_ACCESS_TOKEN
 
 
+def _get_oauth_config(db: Session) -> dict:
+    """Read Partner App credentials: DB (saved from UI) first, then env vars."""
+    try:
+        from app.models.system_settings import SystemSetting
+        rows = {
+            r.key: r.value
+            for r in db.query(SystemSetting).filter(
+                SystemSetting.key.in_(["SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "APP_URL"])
+            ).all()
+        }
+    except Exception:
+        rows = {}
+    return {
+        "api_key":    rows.get("SHOPIFY_API_KEY") or settings.SHOPIFY_API_KEY or "",
+        "api_secret": rows.get("SHOPIFY_API_SECRET") or settings.SHOPIFY_API_SECRET or "",
+        "app_url":    rows.get("APP_URL") or settings.APP_URL or "",
+    }
+
+
 # ── Step 1: Start OAuth ───────────────────────────────────────────────────────
 
 @auth_router.get("/shopify", include_in_schema=False)
-async def shopify_oauth_start(shop: str = Query(..., description="mystore.myshopify.com")):
+async def shopify_oauth_start(
+    shop: str = Query(..., description="mystore.myshopify.com"),
+    db: Session = Depends(get_db),
+):
+    cfg = _get_oauth_config(db)
     missing = []
-    if not settings.SHOPIFY_API_KEY:
+    if not cfg["api_key"]:
         missing.append("SHOPIFY_API_KEY")
-    if not settings.APP_URL:
+    if not cfg["app_url"]:
         missing.append("APP_URL")
     if missing:
         return HTMLResponse(f"""<!DOCTYPE html>
@@ -63,20 +86,20 @@ async def shopify_oauth_start(shop: str = Query(..., description="mystore.myshop
 <body class="bg-gray-50 flex items-center justify-center min-h-screen">
 <div class="bg-white rounded-2xl shadow-lg p-10 text-center max-w-md">
   <div class="text-5xl mb-4">⚠️</div>
-  <h2 class="text-xl font-bold text-red-700 mb-3">Missing Environment Variables</h2>
+  <h2 class="text-xl font-bold text-red-700 mb-3">Missing OAuth Configuration</h2>
   <div class="text-left bg-red-50 rounded-lg p-4 mb-6 text-sm font-mono">
     {"<br>".join(f"❌ {v}" for v in missing)}
   </div>
-  <p class="text-gray-500 text-sm mb-4">Set these on Railway → Variables, then redeploy.</p>
+  <p class="text-gray-500 text-sm mb-4">Set these in Dashboard → Connect Shopify → OAuth tab, or Railway → Variables.</p>
   <a href="/" class="inline-block px-5 py-2 bg-indigo-600 text-white rounded-xl">← Back</a>
 </div></body></html>""", status_code=200)
 
-    base_url = settings.APP_URL.strip().rstrip("/")
+    base_url = cfg["app_url"].strip().rstrip("/")
     redirect_uri = f"{base_url}/auth/shopify/callback"
     url = (
         f"https://{shop}/admin/oauth/authorize?"
         + urlencode({
-            "client_id": settings.SHOPIFY_API_KEY,
+            "client_id": cfg["api_key"],
             "scope": SCOPES,
             "redirect_uri": redirect_uri,
         })
@@ -93,9 +116,11 @@ async def shopify_oauth_callback(
     code: str = Query(...),
     db: Session = Depends(get_db),
 ):
+    cfg = _get_oauth_config(db)
+
     # Validate HMAC
     params = dict(request.query_params)
-    if not _verify_shopify_hmac(params.copy(), settings.SHOPIFY_API_SECRET):
+    if not _verify_shopify_hmac(params.copy(), cfg["api_secret"]):
         raise HTTPException(400, "Invalid HMAC — possible tampering")
 
     # Exchange authorization code → access token
@@ -103,8 +128,8 @@ async def shopify_oauth_callback(
         resp = await client.post(
             f"https://{shop}/admin/oauth/access_token",
             json={
-                "client_id": settings.SHOPIFY_API_KEY,
-                "client_secret": settings.SHOPIFY_API_SECRET,
+                "client_id":     cfg["api_key"],
+                "client_secret": cfg["api_secret"],
                 "code": code,
             },
         )
