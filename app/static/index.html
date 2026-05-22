@@ -281,8 +281,9 @@ async function renderDashboard() {
   } catch(e) {}
 
   try {
+    const sp = S.currentShop ? `&shop_domain=${encodeURIComponent(S.currentShop)}` : ''
     const [posts, clusters] = await Promise.all([
-      GET('/api/v1/blogs/?limit=10&page=1'),
+      GET(`/api/v1/blogs/?limit=10&page=1${sp}`),
       GET('/api/v1/topics/?limit=100'),
     ])
     const published = posts.filter(p => p.status === 'published').length
@@ -371,6 +372,7 @@ async function loadPosts() {
     page: S.postsPage, limit: 20,
     ...(S.postsSource && { source: S.postsSource }),
     ...(S.postsSearch && { keyword: S.postsSearch }),
+    ...(S.currentShop && { shop_domain: S.currentShop }),
   })
   try {
     let posts = await GET(`/api/v1/blogs/?${q}`)
@@ -1312,7 +1314,8 @@ async function runBlogAudit() {
   const btn = document.getElementById('audit-btn')
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Auditing…'
   try {
-    const data = await GET('/api/v1/audit/posts')
+    const sp = S.currentShop ? `?shop_domain=${encodeURIComponent(S.currentShop)}` : ''
+    const data = await GET(`/api/v1/audit/posts${sp}`)
     S.auditResults = data
     renderAuditBlogResults(data)
   } catch(e) { toast('Audit failed: ' + e.message, 'error') }
@@ -2056,19 +2059,26 @@ async function afterLogin() {
     if (!S.currentShop && S.myStores.length > 0) selectShop(S.myStores[0].shop_domain)
   } catch { S.myStores = [] }
 
-  try { S.channels = await GET('/api/v1/blogs/channels') } catch { S.channels = [] }
+  await loadChannelsForShop()
   nav('dashboard')
 }
 
-function selectShop(shop) {
+async function loadChannelsForShop() {
+  const sp = S.currentShop ? `?shop_domain=${encodeURIComponent(S.currentShop)}` : ''
+  try { S.channels = await GET(`/api/v1/blogs/channels${sp}`) } catch { S.channels = [] }
+}
+
+async function selectShop(shop) {
   S.currentShop = shop
   localStorage.setItem('seo_shop', shop)
   const sel = document.getElementById('store-selector')
   if (sel) sel.value = shop
   S.auditResults = null; S.rankingResults = null; S.planResult = null
   S.brandProfile = null; S.allBrands = []; S.selectedBrandDomain = null
-  if (S.page === 'audit') renderAudit()
-  if (S.page === 'brand') renderBrand()
+  S.posts = null; S.postsPage = 1
+  await loadChannelsForShop()
+  // Refresh whatever page the user is on so data reflects the new store
+  if (typeof nav === 'function' && S.page) nav(S.page)
 }
 
 // ══════════════════════ KNOWLEDGE BASE ═══════════════════════
