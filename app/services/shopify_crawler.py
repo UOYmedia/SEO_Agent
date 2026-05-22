@@ -28,7 +28,7 @@ query Articles($blogId: ID!, $first: Int!, $after: String) {
     articles(first: $first, after: $after) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        id title handle body excerpt
+        id title handle body
         author { name }
         tags
         image { url altText }
@@ -144,7 +144,7 @@ class ShopifyCrawler:
             "title": article.get("title", ""),
             "slug": handle,
             "content_html": article.get("body"),
-            "excerpt_html": article.get("excerpt"),
+            "excerpt_html": None,
             "author": author,
             "tags": tags,
             "featured_image_url": image.get("url"),
