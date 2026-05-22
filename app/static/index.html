@@ -165,12 +165,13 @@ const S = {
 let outlineItems = ['Giới thiệu', 'Nội dung chính', 'Lưu ý quan trọng', 'FAQ']
 
 // ═══════════════════════════ API ═════════════════════════════
+const NO_AUTH_PATHS = ['/api/v1/users/login', '/api/v1/users/register', '/api/v1/users/setup-status']
 async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } }
   if (S.token) opts.headers['Authorization'] = 'Bearer ' + S.token
   if (body !== undefined) opts.body = JSON.stringify(body)
   const r = await fetch(path, opts)
-  if (r.status === 401 && path !== '/api/v1/users/login') { showLogin(); throw new Error('Session expired') }
+  if (r.status === 401 && !NO_AUTH_PATHS.includes(path)) { showLogin(false); throw new Error('Session expired') }
   const text = await r.text()
   let data
   try { data = JSON.parse(text) } catch { data = { detail: text } }
@@ -1901,8 +1902,8 @@ async function init() {
   }
   // No valid session — check if any users exist
   try {
-    const count = await fetch('/api/v1/users/').then(r => r.status)
-    showLogin(count === 401)   // 401 = users exist, show login; otherwise show register
+    const status = await fetch('/api/v1/users/setup-status').then(r => r.json())
+    showLogin(status.bootstrapped)  // true = users exist = show login; false = show register
   } catch { showLogin(false) }
 }
 init()
