@@ -21,16 +21,18 @@ class ContentWriter:
     # ── Internal link helpers ─────────────────────────────────────────────────
 
     def _find_related_posts(
-        self, db: Session, focus_keyword: str, tags: list[str], exclude_slug: str = None
+        self,
+        db: Session,
+        focus_keyword: str,
+        tags: list[str],
+        exclude_slug: str = None,
+        shop_domain: Optional[str] = None,
     ) -> list[BlogPost]:
-        """Find existing posts relevant for internal linking."""
-        posts = (
-            db.query(BlogPost)
-            .filter(BlogPost.platform_url.isnot(None))
-            .order_by(BlogPost.published_at.desc())
-            .limit(100)
-            .all()
-        )
+        """Find existing posts relevant for internal linking, scoped to the store."""
+        q = db.query(BlogPost).filter(BlogPost.platform_url.isnot(None))
+        if shop_domain:
+            q = q.filter(BlogPost.shop_domain == shop_domain)
+        posts = q.order_by(BlogPost.published_at.desc()).limit(100).all()
 
         kw_lower = focus_keyword.lower()
         scored = []
@@ -170,7 +172,7 @@ Respond in this exact format:
         internal_posts = []
         if db:
             internal_posts = self._find_related_posts(
-                db, focus_keyword, [], exclude_slug
+                db, focus_keyword, [], exclude_slug, shop_domain=shop_domain
             )
 
         # Knowledge base context (avoid duplicates, guide internal links)
@@ -344,11 +346,13 @@ Respond in this exact format:
         platform: Platform,
         channel_id: Optional[int] = None,
         cluster_id: Optional[int] = None,
+        shop_domain: Optional[str] = None,
     ) -> BlogPost:
         """Save generated article as draft in DB."""
         post = BlogPost(
             platform=platform,
             platform_id=None,
+            shop_domain=shop_domain,
             channel_id=channel_id,
             title=title,
             slug=slug,

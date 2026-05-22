@@ -116,6 +116,7 @@ class ShopifyPublisher:
         blog_handle = blog_handle or "news"
 
         post.platform_id = numeric_id
+        post.shop_domain = self.shop_domain
         post.platform_url = (
             shopify_article.get("onlineStoreUrl")
             or f"https://{self.shop_domain}/blogs/{blog_handle}/{handle}"

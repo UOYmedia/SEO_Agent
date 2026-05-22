@@ -61,3 +61,42 @@ def _migrate_columns():
         add_cols("users", [
             ("can_access_kb", "BOOLEAN DEFAULT FALSE"),
         ])
+
+        add_cols("blog_posts", [
+            ("shop_domain", "VARCHAR(255)"),
+        ])
+
+        add_cols("blog_channels", [
+            ("shop_domain", "VARCHAR(255)"),
+        ])
+
+        _backfill_shop_domain(conn)
+
+
+def _backfill_shop_domain(conn):
+    """Derive shop_domain from platform_url for rows added before scoping."""
+    from urllib.parse import urlparse
+
+    tables = set(inspect(conn).get_table_names())
+    if "blog_posts" not in tables or "blog_channels" not in tables:
+        return
+
+    rows = conn.execute(text(
+        "SELECT id, platform_url FROM blog_posts "
+        "WHERE shop_domain IS NULL AND platform_url IS NOT NULL"
+    )).fetchall()
+    for row in rows:
+        host = urlparse(row[1]).hostname
+        if host:
+            conn.execute(
+                text("UPDATE blog_posts SET shop_domain = :h WHERE id = :i"),
+                {"h": host, "i": row[0]},
+            )
+
+    conn.execute(text(
+        "UPDATE blog_channels SET shop_domain = ("
+        "  SELECT shop_domain FROM blog_posts "
+        "  WHERE blog_posts.channel_id = blog_channels.id "
+        "    AND blog_posts.shop_domain IS NOT NULL LIMIT 1"
+        ") WHERE shop_domain IS NULL"
+    ))

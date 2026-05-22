@@ -1,6 +1,6 @@
 import json
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,9 +14,15 @@ audit_router = APIRouter(prefix="/api/v1/audit", tags=["audit"])
 
 
 @audit_router.get("/posts")
-def audit_all_posts(db: Session = Depends(get_db)):
+def audit_all_posts(
+    shop_domain: Optional[str] = Query(None, description="Filter by shop domain"),
+    db: Session = Depends(get_db),
+):
     """SEO audit all blog posts. Returns scores + issues."""
-    posts = db.query(BlogPost).all()
+    q = db.query(BlogPost)
+    if shop_domain:
+        q = q.filter(BlogPost.shop_domain == shop_domain)
+    posts = q.all()
     if not posts:
         return []
     auditor = SeoAuditor()
@@ -65,7 +71,10 @@ def generate_ranking_plan(body: PlanRequest, db: Session = Depends(get_db)):
     from openai import OpenAI
     client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
-    posts = db.query(BlogPost).limit(30).all()
+    posts_q = db.query(BlogPost)
+    if body.shop_domain:
+        posts_q = posts_q.filter(BlogPost.shop_domain == body.shop_domain)
+    posts = posts_q.limit(30).all()
     posts_text = "\n".join(
         f"- [ID:{p.id}] \"{p.title}\" (keyword: {p.focus_keyword or 'none'}, status: {p.status})"
         for p in posts
