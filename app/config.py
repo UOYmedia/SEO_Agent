@@ -5,11 +5,14 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./seo_agent.db"
     SECRET_KEY: str = "change-me-in-production"
 
+    # App
+    APP_URL: str = ""                # e.g. https://myapp.up.railway.app (no trailing slash)
+
     # Shopify
     SHOPIFY_SHOP_DOMAIN: str = ""
-    SHOPIFY_ACCESS_TOKEN: str = ""
-    SHOPIFY_API_KEY: str = ""        # Client ID (for reference / future OAuth)
-    SHOPIFY_API_SECRET: str = ""     # Client Secret (for reference / future OAuth)
+    SHOPIFY_ACCESS_TOKEN: str = ""   # fallback if OAuth not used
+    SHOPIFY_API_KEY: str = ""        # Partner App Client ID
+    SHOPIFY_API_SECRET: str = ""     # Partner App Client Secret
     SHOPIFY_API_VERSION: str = "2025-07"
 
     # WooCommerce

@@ -195,14 +195,37 @@ function loading(el, html) { if (el) el.innerHTML = html }
 // ═══════════════════════ DASHBOARD ═══════════════════════════
 async function renderDashboard() {
   document.getElementById('header-actions').innerHTML =
-    `<button class="btn btn-primary btn-sm" id="sync-btn" onclick="syncShopify()">🔄 Sync Shopify</button>`
+    `<button class="btn btn-secondary btn-sm" onclick="openConnectModal()">🔗 Connect Shopify</button>
+     <button class="btn btn-primary btn-sm" id="sync-btn" onclick="syncShopify()">🔄 Sync</button>`
 
   document.getElementById('content').innerHTML = `
+    <div id="shopify-status-bar" class="mb-4"></div>
     <div class="grid grid-cols-4 gap-4 mb-5" id="stat-cards">${skeletons(4,'h-24')}</div>
     <div class="card">
       <div class="text-sm font-semibold text-gray-700 mb-3">Recent Posts</div>
       <div id="recent-posts">${skeletons(5)}</div>
     </div>`
+
+  // Load Shopify connection status
+  try {
+    const stores = await GET('/auth/shopify/status')
+    const bar = document.getElementById('shopify-status-bar')
+    if (bar) {
+      if (stores.length > 0) {
+        bar.innerHTML = stores.map(s => `
+          <div class="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-xl px-4 py-2 mb-2">
+            <span>✅</span>
+            <span><strong>${esc(s.shop)}</strong> connected · scopes: ${esc(s.scope||'—')}</span>
+          </div>`).join('')
+      } else {
+        bar.innerHTML = `
+          <div class="flex items-center justify-between text-sm bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-2">
+            <span class="text-amber-800">⚠️ No Shopify store connected yet</span>
+            <button class="btn btn-primary btn-sm" onclick="openConnectModal()">🔗 Connect Now</button>
+          </div>`
+      }
+    }
+  } catch(e) {}
 
   try {
     const [posts, clusters] = await Promise.all([
@@ -831,6 +854,32 @@ function showGenerateResult(r) {
         </button>
       </div>
     </div>`
+}
+
+// ═══════════════════ SHOPIFY CONNECT ═════════════════════════
+function openConnectModal() {
+  openModal('Connect Shopify Store', `
+    <div class="space-y-4">
+      <p class="text-sm text-gray-600">Enter your Shopify store domain to start the OAuth authorization flow.</p>
+      <div>
+        <label>Shop Domain</label>
+        <input type="text" id="connect-shop" placeholder="yourstore.myshopify.com" value="${esc(S.shopDomain||'')}">
+      </div>
+      <div class="text-xs text-gray-400 bg-gray-50 rounded-lg p-3 space-y-1">
+        <div>📋 <strong>Before connecting, make sure in Partner Dashboard:</strong></div>
+        <div>• App setup → App URL = <code>${window.location.origin}/auth/shopify</code></div>
+        <div>• Allowed redirection URLs = <code>${window.location.origin}/auth/shopify/callback</code></div>
+      </div>
+    </div>`,
+    `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
+     <button class="btn btn-primary btn-sm" onclick="doConnect()">🔗 Authorize →</button>`)
+}
+
+function doConnect() {
+  const shop = document.getElementById('connect-shop').value.trim()
+  if (!shop) { toast('Enter shop domain', 'error'); return }
+  S.shopDomain = shop
+  window.location.href = `/auth/shopify?shop=${encodeURIComponent(shop)}`
 }
 
 // ═══════════════════════════ INIT ════════════════════════════
