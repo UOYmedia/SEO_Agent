@@ -30,8 +30,8 @@ user_router = APIRouter(prefix="/api/v1/users", tags=["users"])
 @user_router.get("/setup-status")
 def setup_status(db: Session = Depends(get_db)):
     """Public endpoint — tells the UI whether to show Login or Register."""
-    has_users = db.query(User).count() > 0
-    return {"bootstrapped": has_users}
+    count = db.query(User).count()
+    return {"bootstrapped": count > 0, "user_count": count}
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
