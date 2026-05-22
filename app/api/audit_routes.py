@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.blog_post import BlogPost
+from app.services.auth_service import check_store_scope, get_current_user, get_user_shops
 from app.services.seo_auditor import SeoAuditor
 from app.services.ranking_checker import RankingChecker
 from app.config import settings
@@ -16,12 +17,19 @@ audit_router = APIRouter(prefix="/api/v1/audit", tags=["audit"])
 @audit_router.get("/posts")
 def audit_all_posts(
     shop_domain: Optional[str] = Query(None, description="Filter by shop domain"),
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """SEO audit all blog posts. Returns scores + issues."""
+    """SEO audit blog posts for the active store (or all stores the user can access)."""
     q = db.query(BlogPost)
     if shop_domain:
+        check_store_scope(user, shop_domain, "audit", db)
         q = q.filter(BlogPost.shop_domain == shop_domain)
+    elif user.role != "admin":
+        shops = get_user_shops(user, db)
+        if not shops:
+            return []
+        q = q.filter(BlogPost.shop_domain.in_(shops))
     posts = q.all()
     if not posts:
         return []
@@ -31,10 +39,16 @@ def audit_all_posts(
 
 
 @audit_router.get("/posts/{post_id}")
-def audit_single_post(post_id: int, db: Session = Depends(get_db)):
+def audit_single_post(
+    post_id: int,
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
     if not post:
         raise HTTPException(404, "Post not found")
+    if post.shop_domain:
+        check_store_scope(user, post.shop_domain, "audit", db)
     return SeoAuditor().audit_post(post)
 
 
