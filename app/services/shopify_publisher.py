@@ -1,6 +1,7 @@
 """
-Publish AI-generated articles to Shopify via Admin REST API.
-Handles image attachment (base64) and post-publish DB sync.
+Publish AI-generated articles to Shopify via Admin GraphQL API.
+REST /articles.json is deprecated in 2025-07+; this uses articleCreate mutation.
+Image is passed as a URL (DALL-E temp URL) — Shopify fetches and hosts it.
 """
 from datetime import datetime
 from typing import Optional
@@ -12,6 +13,21 @@ from app.config import settings
 from app.models.blog_post import BlogPost, PostStatus
 
 
+_ARTICLE_CREATE = """
+mutation ArticleCreate($article: ArticleCreateInput!) {
+  articleCreate(article: $article) {
+    article {
+      id
+      handle
+      onlineStoreUrl
+      image { url altText }
+    }
+    userErrors { field message }
+  }
+}
+"""
+
+
 class ShopifyPublisher:
     def __init__(
         self,
@@ -21,7 +37,7 @@ class ShopifyPublisher:
         self.shop_domain = (shop_domain or settings.SHOPIFY_SHOP_DOMAIN).strip().rstrip("/")
         self.access_token = access_token or settings.SHOPIFY_ACCESS_TOKEN
         self.api_version = settings.SHOPIFY_API_VERSION
-        self.base_url = f"https://{self.shop_domain}/admin/api/{self.api_version}"
+        self.endpoint = f"https://{self.shop_domain}/admin/api/{self.api_version}/graphql.json"
 
     def _headers(self) -> dict:
         return {
@@ -29,82 +45,60 @@ class ShopifyPublisher:
             "Content-Type": "application/json",
         }
 
+    async def _gql(self, query: str, variables: dict) -> dict:
+        async with httpx.AsyncClient(headers=self._headers(), timeout=120.0) as client:
+            resp = await client.post(
+                self.endpoint,
+                json={"query": query, "variables": variables},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if errors := data.get("errors"):
+                raise ValueError(str(errors[0].get("message", errors)))
+            return data["data"]
+
     async def publish_article(
         self,
         post: BlogPost,
         blog_id: int,
         author: str = "SEO Agent",
         published: bool = True,
-        image_b64: Optional[str] = None,
-        image_filename: str = "banner.jpg",
+        image_url: Optional[str] = None,
         image_alt: Optional[str] = None,
     ) -> dict:
-        """POST article to Shopify. Returns the Shopify article dict."""
-        tags_str = ", ".join(post.tags or [])
-
-        article: dict = {
+        """
+        Create a Shopify article via GraphQL articleCreate mutation.
+        blog_id: numeric Shopify blog ID (e.g. 12345678).
+        image_url: public URL that Shopify will fetch and host (e.g. DALL-E URL).
+        Returns the created article node dict.
+        """
+        article_input: dict = {
+            "blogId": f"gid://shopify/Blog/{blog_id}",
             "title": post.title,
-            "author": author,
-            "body_html": post.content_html or "",
-            "summary_html": post.excerpt_html or "",
-            "tags": tags_str,
-            "published": published,
-            "metafields": [
-                {
-                    "namespace": "global",
-                    "key": "title_tag",
-                    "value": (post.seo_title or post.title)[:255],
-                    "type": "single_line_text_field",
-                },
-                {
-                    "namespace": "global",
-                    "key": "description_tag",
-                    "value": (post.seo_description or "")[:255],
-                    "type": "single_line_text_field",
-                },
-            ],
+            "body": post.content_html or "",
+            "summary": post.excerpt_html or "",
+            "author": {"name": author},
+            "tags": post.tags or [],
+            "isPublished": published,
+            "seo": {
+                "title": (post.seo_title or post.title)[:255],
+                "description": (post.seo_description or "")[:255],
+            },
         }
-
-        if image_b64:
-            article["image"] = {
-                "attachment": image_b64,
-                "filename": image_filename,
-                "alt": image_alt or post.title,
+        if image_url:
+            article_input["image"] = {
+                "src": image_url,
+                "altText": (image_alt or post.title)[:512],
             }
 
-        async with httpx.AsyncClient(headers=self._headers(), timeout=120.0) as client:
-            resp = await client.post(
-                f"{self.base_url}/blogs/{blog_id}/articles.json",
-                json={"article": article},
-            )
-            resp.raise_for_status()
-            return resp.json()["article"]
+        data = await self._gql(_ARTICLE_CREATE, {"article": article_input})
+        result = data["articleCreate"]
 
-    async def update_article_image(
-        self,
-        blog_id: int,
-        article_id: int,
-        image_b64: str,
-        filename: str = "banner.jpg",
-        alt: str = "",
-    ) -> dict:
-        """Attach / replace the featured image of an existing Shopify article."""
-        async with httpx.AsyncClient(headers=self._headers(), timeout=120.0) as client:
-            resp = await client.put(
-                f"{self.base_url}/blogs/{blog_id}/articles/{article_id}.json",
-                json={
-                    "article": {
-                        "id": article_id,
-                        "image": {
-                            "attachment": image_b64,
-                            "filename": filename,
-                            "alt": alt,
-                        },
-                    }
-                },
-            )
-            resp.raise_for_status()
-            return resp.json()["article"]
+        if result["userErrors"]:
+            msgs = "; ".join(f"{e['field']}: {e['message']}" for e in result["userErrors"])
+            raise ValueError(f"Shopify userErrors: {msgs}")
+
+        return result["article"]
 
     def sync_after_publish(
         self,
@@ -113,19 +107,24 @@ class ShopifyPublisher:
         shopify_article: dict,
         blog_handle: Optional[str] = None,
     ) -> BlogPost:
-        """Update local BlogPost with Shopify IDs, URL, and image after publish."""
+        """Update local BlogPost with Shopify IDs, URL and CDN image URL."""
+        gid = shopify_article.get("id", "")
+        numeric_id = gid.rsplit("/", 1)[-1] if "/" in gid else gid
         handle = shopify_article.get("handle", post.slug or "")
         blog_handle = blog_handle or "news"
 
-        post.platform_id = str(shopify_article["id"])
-        post.platform_url = f"https://{self.shop_domain}/blogs/{blog_handle}/{handle}"
+        post.platform_id = numeric_id
+        post.platform_url = (
+            shopify_article.get("onlineStoreUrl")
+            or f"https://{self.shop_domain}/blogs/{blog_handle}/{handle}"
+        )
         post.status = PostStatus.PUBLISHED
         post.published_at = datetime.utcnow()
 
         img = shopify_article.get("image") or {}
-        if img.get("src"):
-            post.featured_image_url = img["src"]
-            post.featured_image_alt = img.get("alt") or post.title
+        if img.get("url"):
+            post.featured_image_url = img["url"]
+            post.featured_image_alt = img.get("altText") or post.title
 
         db.commit()
         db.refresh(post)

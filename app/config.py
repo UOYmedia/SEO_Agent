@@ -8,7 +8,9 @@ class Settings(BaseSettings):
     # Shopify
     SHOPIFY_SHOP_DOMAIN: str = ""
     SHOPIFY_ACCESS_TOKEN: str = ""
-    SHOPIFY_API_VERSION: str = "2024-01"
+    SHOPIFY_API_KEY: str = ""        # Client ID (for reference / future OAuth)
+    SHOPIFY_API_SECRET: str = ""     # Client Secret (for reference / future OAuth)
+    SHOPIFY_API_VERSION: str = "2025-07"
 
     # WooCommerce
     WC_STORE_URL: str = ""
