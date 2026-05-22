@@ -92,7 +92,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: rgb(55 65 81);
     <a class="nav-link" data-page="topics"    onclick="nav('topics')">🗂 Topic Clusters</a>
     <a class="nav-link" data-page="generate"  onclick="nav('generate')">✍️ Generate Article</a>
     <a class="nav-link" data-page="audit"     onclick="nav('audit')">📈 SEO Audit</a>
-    <a class="nav-link" data-page="knowledge" onclick="nav('knowledge')">🧠 Knowledge Base</a>
+    <a class="nav-link hidden" id="kb-nav-link" data-page="knowledge" onclick="nav('knowledge')">🧠 Knowledge Base</a>
     <a class="nav-link" data-page="brand"     onclick="nav('brand')">🎨 Brand Profile</a>
     <div id="admin-nav" class="hidden">
       <div class="border-t border-indigo-900 my-2"></div>
@@ -214,7 +214,7 @@ function nav(page) {
   S.page = page
   document.querySelectorAll('.nav-link').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page))
-  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', users: 'User Management', brand: 'Brand Profile' }
+  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', knowledge: 'Knowledge Base', users: 'User Management', brand: 'Brand Profile' }
   document.getElementById('page-title').textContent = titles[page] || page
   const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, knowledge: renderKnowledge, users: renderUsers, brand: renderBrand }
   pages[page]?.()
@@ -1813,6 +1813,12 @@ async function afterLogin() {
   document.getElementById('user-role').textContent   = u.role === 'admin' ? '👑 Admin' : '👤 Member'
   if (u.role === 'admin') document.getElementById('admin-nav').classList.remove('hidden')
   else document.getElementById('admin-nav').classList.add('hidden')
+  // Show Knowledge Base nav only for admin or assigned users
+  const kbLink = document.getElementById('kb-nav-link')
+  if (kbLink) {
+    if (u.can_access_kb) kbLink.classList.remove('hidden')
+    else kbLink.classList.add('hidden')
+  }
 
   // Load accessible stores
   try {
@@ -1842,13 +1848,20 @@ function selectShop(shop) {
 
 // ══════════════════════ KNOWLEDGE BASE ═══════════════════════
 async function renderKnowledge() {
+  if (!S.user?.can_access_kb) {
+    document.getElementById('header-actions').innerHTML = ''
+    document.getElementById('content').innerHTML =
+      `<div class="card text-center py-12 text-gray-400">🔒 You don't have access to the Knowledge Base. Ask an admin to grant access.</div>`
+    return
+  }
+
   const shop = S.currentShop || ''
   const sp = shop ? `?shop_domain=${encodeURIComponent(shop)}` : ''
 
   document.getElementById('header-actions').innerHTML =
     `<button class="btn btn-primary btn-sm" onclick="kbApproveAll()">✅ Approve All Pending</button>`
 
-  document.getElementById('main-content').innerHTML = `
+  document.getElementById('content').innerHTML = `
     <div class="space-y-6">
 
       <!-- Stats bar -->
@@ -2385,9 +2398,10 @@ async function loadUsersTable() {
                   <span class="badge ${u.is_active?'badge-green':'badge-gray'}">${u.is_active?'Active':'Disabled'}</span>
                 </td>
                 <td class="py-3 px-3">
-                  <div class="flex gap-1 action-btns">
+                  <div class="flex gap-1 action-btns flex-wrap">
                     <button class="btn btn-secondary btn-sm" onclick="openPermModal(${u.id},'${esc(u.name)}',${JSON.stringify(u.store_permissions||[])})">🔑 Permissions</button>
                     <button class="btn btn-secondary btn-sm" onclick="toggleUserActive(${u.id},${!u.is_active})">${u.is_active?'Disable':'Enable'}</button>
+                    ${u.role !== 'admin' ? `<button class="btn btn-sm" style="${u.can_access_kb?'background:#dcfce7;color:#166534':'background:#f3f4f6;color:#374151'}" title="${u.can_access_kb?'Revoke KB access':'Grant KB access'}" onclick="toggleKbAccess(${u.id})">${u.can_access_kb?'🧠 KB ✓':'🧠 KB'}</button>` : ''}
                     ${u.id !== S.user?.id ? `<button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${esc(u.name)}')">×</button>` : ''}
                   </div>
                 </td>
@@ -2519,6 +2533,14 @@ async function deleteUser(userId, name) {
   try {
     await api('DELETE', `/api/v1/users/${userId}`)
     toast('User deleted', 'success')
+    loadUsersTable()
+  } catch(e) { toast(e.message, 'error') }
+}
+
+async function toggleKbAccess(userId) {
+  try {
+    const r = await api('PATCH', `/api/v1/users/${userId}/kb-access`)
+    toast(r.can_access_kb ? '🧠 KB access granted' : 'KB access revoked', 'success')
     loadUsersTable()
   } catch(e) { toast(e.message, 'error') }
 }

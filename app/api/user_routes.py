@@ -151,6 +151,17 @@ def update_user(user_id: int, body: UpdateUserBody, admin=Depends(require_admin)
     return _user_out(user, db)
 
 
+@user_router.patch("/{user_id}/kb-access")
+def toggle_kb_access(user_id: int, admin=Depends(require_admin), db: Session = Depends(get_db)):
+    """Grant or revoke Knowledge Base access for a member user."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+    user.can_access_kb = not bool(user.can_access_kb)
+    db.commit()
+    return {"id": user.id, "can_access_kb": user.can_access_kb}
+
+
 @user_router.delete("/{user_id}")
 def delete_user(user_id: int, admin=Depends(require_admin), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
@@ -278,6 +289,7 @@ def _user_out(user: User, db: Session = None) -> dict:
         "name": user.name,
         "role": user.role,
         "is_active": user.is_active,
+        "can_access_kb": user.role == "admin" or bool(getattr(user, "can_access_kb", False)),
         "created_at": user.created_at,
         "store_permissions": perms,
     }

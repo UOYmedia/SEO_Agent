@@ -56,3 +56,7 @@ def _migrate_columns():
         add_cols("article_feedback", [
             ("shop_domain", "VARCHAR(255)"),
         ])
+
+        add_cols("users", [
+            ("can_access_kb", "BOOLEAN DEFAULT FALSE"),
+        ])
