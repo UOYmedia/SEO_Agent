@@ -112,13 +112,13 @@ async def full_publish(
 ):
     """
     One-shot publish:
-    1. Generate DALL-E 3 banner (if generate_image=True)
-    2. POST article to Shopify with image as base64 attachment
+    1. Generate DALL-E 3 banner URL (if generate_image=True) — Shopify fetches it
+    2. Create article via GraphQL articleCreate mutation
     3. Update local DB with Shopify IDs + CDN image URL
     """
     post = _get_post_or_404(post_id, db)
 
-    image_b64: Optional[str] = None
+    image_url: Optional[str] = None
     revised_prompt: Optional[str] = None
 
     if body.generate_image:
@@ -129,8 +129,9 @@ async def full_publish(
         )
         generator = ImageGenerator()
         try:
-            img = generator.generate(prompt=prompt, size=body.image_size, response_format="b64_json")
-            image_b64 = img["b64_data"]
+            # Use URL format — Shopify GraphQL accepts image.src URL directly
+            img = generator.generate(prompt=prompt, size=body.image_size, response_format="url")
+            image_url = img["url"]
             revised_prompt = img["revised_prompt"]
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"DALL-E error: {e}")
@@ -142,8 +143,7 @@ async def full_publish(
             blog_id=body.blog_id,
             author=body.author,
             published=body.published,
-            image_b64=image_b64,
-            image_filename=f"{post.slug or 'banner'}.jpg",
+            image_url=image_url,
             image_alt=post.title,
         )
     except Exception as e:
@@ -158,6 +158,6 @@ async def full_publish(
         "platform_url": updated.platform_url,
         "featured_image_url": updated.featured_image_url,
         "status": updated.status,
-        "image_uploaded": image_b64 is not None,
+        "image_uploaded": image_url is not None,
         "revised_prompt": revised_prompt,
     }
