@@ -5,11 +5,16 @@ GET  /api/v1/settings/brands                 — list all brand profiles
 GET  /api/v1/settings/brand?shop_domain=...  — fetch single profile
 PUT  /api/v1/settings/brand                  — create or update profile
 
+Shopify OAuth credentials (DB override for env vars):
+GET  /api/v1/settings/oauth                  — get current OAuth config (admin)
+PUT  /api/v1/settings/oauth                  — save OAuth credentials to DB (admin)
+
 GSC OAuth2 (per-brand):
 GET  /api/v1/settings/gsc/connect?shop_domain=...  — start OAuth flow, returns auth URL
 GET  /api/v1/settings/gsc/callback                 — OAuth2 callback, saves refresh_token
 DELETE /api/v1/settings/gsc/disconnect?shop_domain=... — revoke & clear token
 """
+from datetime import datetime
 from typing import Optional
 from urllib.parse import urlencode
 
@@ -111,6 +116,66 @@ def save_brand_profile(
     db.commit()
     db.refresh(profile)
     return _profile_out(profile)
+
+
+# ── Shopify OAuth credentials ─────────────────────────────────────────────────
+
+class OAuthSettingsBody(BaseModel):
+    api_key: str = ""
+    api_secret: str = ""   # send "" to leave unchanged, "***" is also ignored
+    app_url: str = ""
+
+
+@settings_router.get("/oauth")
+def get_oauth_settings(
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return current Shopify Partner App credentials (DB override or env var)."""
+    if user.role != "admin":
+        raise HTTPException(403, "Admin only")
+    from app.models.system_settings import SystemSetting
+    rows = {
+        r.key: r.value
+        for r in db.query(SystemSetting).filter(
+            SystemSetting.key.in_(["SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "APP_URL"])
+        ).all()
+    }
+    has_secret = bool(rows.get("SHOPIFY_API_SECRET") or settings.SHOPIFY_API_SECRET)
+    return {
+        "api_key":    rows.get("SHOPIFY_API_KEY") or settings.SHOPIFY_API_KEY or "",
+        "api_secret": "***" if has_secret else "",   # never expose the actual secret
+        "app_url":    rows.get("APP_URL") or settings.APP_URL or "",
+        "source":     "db" if rows else "env",
+    }
+
+
+@settings_router.put("/oauth")
+def save_oauth_settings(
+    body: OAuthSettingsBody,
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Save Shopify Partner App credentials to DB (overrides env vars at runtime)."""
+    if user.role != "admin":
+        raise HTTPException(403, "Admin only")
+    from app.models.system_settings import SystemSetting
+
+    def _upsert(key: str, value: str):
+        if not value or value == "***":
+            return
+        row = db.query(SystemSetting).filter_by(key=key).first()
+        if not row:
+            row = SystemSetting(key=key)
+            db.add(row)
+        row.value = value
+        row.updated_at = datetime.utcnow()
+
+    _upsert("SHOPIFY_API_KEY", body.api_key)
+    _upsert("SHOPIFY_API_SECRET", body.api_secret)
+    _upsert("APP_URL", body.app_url)
+    db.commit()
+    return {"saved": True}
 
 
 # ── GSC OAuth2 ────────────────────────────────────────────────────────────────

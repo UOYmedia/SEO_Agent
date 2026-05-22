@@ -1806,7 +1806,11 @@ function prefillRankingCheck(keyword) {
 }
 
 // ═══════════════════ SHOPIFY CONNECT ═════════════════════════
-function openConnectModal() {
+async function openConnectModal() {
+  // Load saved OAuth settings before rendering modal
+  let oauthCfg = { api_key: '', api_secret: '', app_url: window.location.origin }
+  try { oauthCfg = await GET('/api/v1/settings/oauth') } catch {}
+
   openModal('Connect Shopify Store', `
     <div class="space-y-4">
       <!-- Tabs -->
@@ -1839,22 +1843,45 @@ function openConnectModal() {
 
       <!-- OAuth tab -->
       <div id="ct-panel-oauth" class="space-y-3 hidden">
-        <p class="text-sm text-gray-600">Dùng khi bạn đã setup Shopify Partner App với OAuth.</p>
+        <p class="text-sm text-gray-600">Dùng cho Shopify Partner App — cần API Key &amp; Secret từ Partner Dashboard.</p>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label>API Key (Client ID) <span class="text-red-500">*</span></label>
+            <input type="text" id="ct-api-key" placeholder="abc123..." value="${esc(oauthCfg.api_key||'')}">
+          </div>
+          <div>
+            <label>API Secret <span class="text-red-500">*</span></label>
+            <input type="password" id="ct-api-secret" placeholder="${oauthCfg.api_secret === '***' ? '(saved — leave blank to keep)' : 'shpss_...'}">
+          </div>
+        </div>
+        <div>
+          <label>App URL <span class="text-red-500">*</span></label>
+          <input type="text" id="ct-app-url" placeholder="https://your-app.up.railway.app" value="${esc(oauthCfg.app_url||window.location.origin)}">
+          <div class="text-xs text-gray-400 mt-1">Redirect URL cho Partner Dashboard: <code id="ct-redirect-preview">${esc((oauthCfg.app_url||window.location.origin).replace(/\/$/,''))}/auth/shopify/callback</code></div>
+        </div>
         <div>
           <label>Shop Domain <span class="text-red-500">*</span></label>
           <input type="text" id="connect-shop-oauth" placeholder="yourstore.myshopify.com" value="${esc(S.shopDomain||'')}">
         </div>
-        <div class="text-xs text-gray-400 bg-gray-50 rounded-lg p-3 space-y-1">
-          <div>📋 <strong>Partner Dashboard phải có:</strong></div>
-          <div>• App URL = <code>${window.location.origin}/auth/shopify</code></div>
-          <div>• Allowed redirection URLs = <code>${window.location.origin}/auth/shopify/callback</code></div>
+        <div class="text-xs text-gray-400 bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+          <div>⚠️ <strong>Partner Dashboard → App setup phải có:</strong></div>
+          <div>• Allowed redirection URLs = <code id="ct-redirect-preview2">${esc((oauthCfg.app_url||window.location.origin).replace(/\/$/,''))}/auth/shopify/callback</code></div>
         </div>
       </div>
     </div>`,
     `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
      <button class="btn btn-primary btn-sm" id="do-connect-btn" onclick="doConnect()">🔗 Connect Store</button>`)
-  // store active tab
   window._connectTab = 'token'
+  // Live-update redirect URL preview
+  setTimeout(() => {
+    const urlEl = document.getElementById('ct-app-url')
+    if (urlEl) urlEl.addEventListener('input', e => {
+      const base = e.target.value.trim().replace(/\/$/, '')
+      const cb = `${base}/auth/shopify/callback`
+      document.getElementById('ct-redirect-preview').textContent = cb
+      document.getElementById('ct-redirect-preview2').textContent = cb
+    })
+  }, 50)
 }
 
 function switchConnectTab(tab) {
@@ -1868,8 +1895,22 @@ function switchConnectTab(tab) {
 async function doConnect() {
   const tab = window._connectTab || 'token'
   if (tab === 'oauth') {
-    const shop = document.getElementById('connect-shop-oauth').value.trim()
-    if (!shop) { toast('Enter shop domain', 'error'); return }
+    const shop   = document.getElementById('connect-shop-oauth').value.trim()
+    const apiKey = document.getElementById('ct-api-key').value.trim()
+    const secret = document.getElementById('ct-api-secret').value.trim()
+    const appUrl = document.getElementById('ct-app-url').value.trim()
+    if (!shop)   { toast('Enter shop domain', 'error'); return }
+    if (!apiKey) { toast('Enter API Key', 'error'); return }
+    if (!appUrl) { toast('Enter App URL', 'error'); return }
+    const btn = document.getElementById('do-connect-btn')
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Saving settings…'
+    try {
+      await PUT('/api/v1/settings/oauth', { api_key: apiKey, api_secret: secret, app_url: appUrl })
+    } catch(e) {
+      toast('Failed to save OAuth settings: ' + e.message, 'error')
+      btn.disabled = false; btn.innerHTML = '🔗 Connect Store'
+      return
+    }
     S.shopDomain = shop
     window.location.href = `/auth/shopify?shop=${encodeURIComponent(shop)}`
     return
