@@ -11,6 +11,7 @@ from app.schemas.content import (
     GeneratedArticleOut,
     KeywordResearchOut,
     KeywordResearchRequest,
+    TitleSuggestionRequest,
     TopicPlanRequest,
 )
 from app.services.auth_service import check_store_scope, get_current_user
@@ -76,6 +77,24 @@ def get_topic_cluster(cluster_id: int, db: Session = Depends(get_db)):
 
 
 # ── Content Generation ────────────────────────────────────────────────────────
+
+@generate_router.post("/title")
+def suggest_titles(body: TitleSuggestionRequest, user=Depends(get_current_user)):
+    """Generate SEO-friendly title suggestions for a focus keyword."""
+    if not body.focus_keyword.strip():
+        raise HTTPException(422, "focus_keyword is required")
+    titles = ContentWriter().suggest_titles(
+        focus_keyword=body.focus_keyword.strip(),
+        language=body.language,
+        market=body.market,
+        article_type=body.article_type,
+        notes=body.notes,
+        count=max(1, min(body.count, 10)),
+    )
+    if not titles:
+        raise HTTPException(502, "Title suggestion failed — model returned no parseable output")
+    return {"titles": titles}
+
 
 @generate_router.post("/article")
 async def generate_article(body: GenerateArticleRequest, db: Session = Depends(get_db)):
@@ -157,6 +176,9 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
         brand_profile=brand_profile,
         feedback_lessons=feedback_lessons,
         shop_domain=body.shop_domain or None,
+        notes=body.notes,
+        market=body.market,
+        article_type=body.article_type,
     )
 
     # Save draft to DB
