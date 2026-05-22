@@ -167,7 +167,29 @@ const S = {
   planResult: null,
   rankingKeywords: '',
 }
-let outlineItems = ['Giới thiệu', 'Nội dung chính', 'Lưu ý quan trọng', 'FAQ']
+let outlineItems = ['Introduction', 'Main content', 'Key takeaways', 'FAQ']
+
+// Outline templates keyed by article type. Selecting one replaces outlineItems.
+const OUTLINE_TEMPLATES = {
+  'qa':         ['Introduction', 'The main question explained', 'Detailed answer', 'Related questions people ask', 'Quick summary'],
+  'info':       ['Introduction', 'What is it?', 'Why it matters', 'How it works', 'Real-world examples', 'Key takeaways'],
+  'tips':       ['Introduction', 'Tip 1', 'Tip 2', 'Tip 3', 'Tip 4', 'Tip 5', 'Bonus tip', 'Conclusion'],
+  'fun_fact':   ['Introduction', 'Fact #1', 'Fact #2', 'Fact #3', 'Fact #4', 'Fact #5', 'Why these facts matter', 'Wrap-up'],
+  'product':    ['Introduction', 'The problem you face', 'Our solution', 'Key features', 'How to use it', 'Customer reviews', 'Where to buy'],
+  'listicle':   ['Introduction', '#1', '#2', '#3', '#4', '#5', 'Honorable mentions', 'Conclusion'],
+  'comparison': ['Introduction', 'Option A overview', 'Option B overview', 'Side-by-side comparison', 'Which one to choose', 'Final verdict'],
+  'howto':      ['Introduction', 'What you will need', 'Step 1', 'Step 2', 'Step 3', 'Common mistakes to avoid', 'Pro tips', 'Conclusion'],
+}
+const ARTICLE_TYPE_LABELS = {
+  qa: '❓ Q&A',
+  info: '📚 Informational',
+  tips: '💡 Tips & Tricks',
+  fun_fact: '🎲 Fun Facts',
+  product: '🛍 Product Promotion',
+  listicle: '📋 Listicle',
+  comparison: '⚖️ Comparison',
+  howto: '🛠 How-to Guide',
+}
 
 // ═══════════════════════════ API ═════════════════════════════
 const NO_AUTH_PATHS = ['/api/v1/users/login', '/api/v1/users/register', '/api/v1/users/setup-status']
@@ -1057,6 +1079,9 @@ async function renderGenerate() {
     </option>`).join('')
   const selectedBrand = S.allBrands.find(b => b.shop_domain === S.selectedBrandDomain)
 
+  const typeOpts = Object.entries(ARTICLE_TYPE_LABELS)
+    .map(([v, label]) => `<option value="${v}">${label}</option>`).join('')
+
   document.getElementById('content').innerHTML = `
     <div class="grid gap-6" style="grid-template-columns:1fr 320px">
       <!-- Left: form -->
@@ -1065,16 +1090,26 @@ async function renderGenerate() {
           <div class="text-sm font-semibold text-gray-700 mb-4">Article Details</div>
           <div class="space-y-3">
             <div>
-              <label>Article Title</label>
-              <input type="text" id="gen-title" placeholder="e.g. Top 10 Đồng Hồ Cơ Nam 2025">
-            </div>
-            <div>
               <label>Focus Keyword</label>
-              <input type="text" id="gen-kw" placeholder="e.g. đồng hồ cơ nam">
+              <input type="text" id="gen-kw" placeholder="e.g. wireless earbuds for running">
             </div>
             <div>
-              <label>Outline (one H2 section per line)</label>
-              <div id="outline-list" class="space-y-2"></div>
+              <div class="flex items-center justify-between">
+                <label class="!mb-0">Article Title</label>
+                <button class="text-xs text-indigo-500 hover:underline" onclick="suggestTitles()">✨ Suggest titles</button>
+              </div>
+              <input type="text" id="gen-title" placeholder="Click ✨ Suggest titles or write your own (SEO 50–65 chars)">
+              <div id="gen-title-suggestions" class="mt-2 space-y-1"></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between">
+                <label class="!mb-0">Outline (one H2 section per line)</label>
+                <select id="gen-type" onchange="applyOutlineTemplate(this.value)" class="!w-auto text-xs" style="padding:4px 8px">
+                  <option value="">📑 Pick a template…</option>
+                  ${typeOpts}
+                </select>
+              </div>
+              <div id="outline-list" class="space-y-2 mt-2"></div>
               <button class="btn btn-secondary btn-sm mt-2" onclick="addOutlineItem()">+ Add Section</button>
             </div>
           </div>
@@ -1084,7 +1119,24 @@ async function renderGenerate() {
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label>Language</label>
-              <select id="gen-lang"><option value="vi">Vietnamese</option><option value="en">English</option></select>
+              <select id="gen-lang">
+                <option value="en" selected>English</option>
+                <option value="vi">Vietnamese</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+              </select>
+            </div>
+            <div>
+              <label>Market</label>
+              <select id="gen-market">
+                <option value="us" selected>🇺🇸 United States</option>
+                <option value="uk">🇬🇧 United Kingdom</option>
+                <option value="ca">🇨🇦 Canada</option>
+                <option value="au">🇦🇺 Australia</option>
+                <option value="in">🇮🇳 India</option>
+                <option value="vn">🇻🇳 Vietnam</option>
+              </select>
             </div>
             <div>
               <label>Tone</label>
@@ -1099,12 +1151,17 @@ async function renderGenerate() {
               <label>Word Count</label>
               <input type="number" id="gen-words" value="1500" min="800" max="5000">
             </div>
-            <div>
+            <div class="col-span-2">
               <label>Blog Channel</label>
               <select id="gen-channel">
                 <option value="">— None —</option>
                 ${S.channels.map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('')}
               </select>
+            </div>
+            <div class="col-span-2">
+              <label>📝 Notes (steer the AI)</label>
+              <textarea id="gen-notes" rows="3"
+                placeholder="Anything the AI must follow — e.g.:&#10;• Mention our 30-day money-back guarantee&#10;• Avoid comparing to Brand X&#10;• Use a casual, Gen-Z voice in the intro"></textarea>
             </div>
           </div>
         </div>
@@ -1147,6 +1204,42 @@ async function renderGenerate() {
   const prefChannel = S.currentShop ? localStorage.getItem(`seo_pref_channel_${S.currentShop}`) : null
   if (prefChannel) { const sel = document.getElementById('gen-channel'); if (sel) sel.value = prefChannel }
   if (S.generated) showGenerateResult(S.generated)
+}
+
+function applyOutlineTemplate(key) {
+  if (!key || !OUTLINE_TEMPLATES[key]) return
+  outlineItems = [...OUTLINE_TEMPLATES[key]]
+  renderOutline()
+  toast(`Loaded "${ARTICLE_TYPE_LABELS[key]}" template`, 'success')
+}
+
+async function suggestTitles() {
+  const kw = document.getElementById('gen-kw').value.trim()
+  if (!kw) { toast('Enter a focus keyword first', 'error'); return }
+  const box = document.getElementById('gen-title-suggestions')
+  box.innerHTML = `<div class="text-xs text-gray-400 flex items-center gap-2"><span class="spinner"></span> Generating titles…</div>`
+  try {
+    const r = await POST('/api/v1/generate/title', {
+      focus_keyword: kw,
+      language:     document.getElementById('gen-lang').value,
+      market:       document.getElementById('gen-market').value,
+      article_type: document.getElementById('gen-type')?.value || null,
+      notes:        document.getElementById('gen-notes')?.value || null,
+      count: 5,
+    })
+    box.innerHTML = r.titles.map(t => `
+      <button class="w-full text-left text-xs px-2 py-1.5 rounded border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 transition"
+        onclick="useGenTitle(${JSON.stringify(t).replace(/"/g,'&quot;')})">
+        ${esc(t)} <span class="text-gray-400">(${t.length} chars)</span>
+      </button>`).join('')
+  } catch(e) {
+    box.innerHTML = `<div class="text-xs text-red-500">${esc(e.message)}</div>`
+  }
+}
+
+function useGenTitle(title) {
+  document.getElementById('gen-title').value = title
+  document.getElementById('gen-title-suggestions').innerHTML = ''
 }
 
 function selectGenBrand(domain) {
@@ -1235,8 +1328,11 @@ async function doGenerate() {
     const r = await POST('/api/v1/generate/article', {
       title, focus_keyword: keyword, outline,
       language:        document.getElementById('gen-lang').value,
+      market:          document.getElementById('gen-market')?.value || 'us',
       tone:            document.getElementById('gen-tone').value,
       word_count:      parseInt(document.getElementById('gen-words').value),
+      notes:           document.getElementById('gen-notes')?.value?.trim() || null,
+      article_type:    document.getElementById('gen-type')?.value || null,
       blog_channel_id: channelId ? parseInt(channelId) : null,
       shop_domain:     brandDomain || S.currentShop || null,
     })
