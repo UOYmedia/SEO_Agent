@@ -86,10 +86,6 @@ class ShopifyPublisher:
             "author": {"name": author},
             "tags": post.tags or [],
             "isPublished": published,
-            "seo": {
-                "title": (post.seo_title or post.title)[:255],
-                "description": (post.seo_description or "")[:255],
-            },
         }
         if image_url:
             article_input["image"] = {
