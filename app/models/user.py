@@ -15,6 +15,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     role           = Column(String(20), default="member")   # "admin" | "member"
     is_active      = Column(Boolean, default=True)
+    can_access_kb  = Column(Boolean, default=False)         # admin can grant KB access
     created_at     = Column(DateTime, default=datetime.utcnow)
 
     store_permissions = relationship(
