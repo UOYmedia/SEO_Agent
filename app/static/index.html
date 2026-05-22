@@ -1545,7 +1545,13 @@ async function doAuth(isRegister) {
     localStorage.setItem('seo_token', S.token)
     toast('Welcome, ' + data.user.name + '!', 'success')
     afterLogin()
-  } catch(e) { toast(e.message, 'error') }
+  } catch(e) {
+    toast(e.message, 'error')
+    if (!isRegister) {
+      const st = await fetch('/api/v1/users/setup-status').then(r=>r.json()).catch(()=>null)
+      if (st && !st.bootstrapped) { toast('No accounts found — please register first', 'info'); showLogin(true) }
+    }
+  }
 }
 
 function doLogout() {
@@ -1899,7 +1905,7 @@ async function init() {
   try {
     const status = await fetch('/api/v1/users/setup-status').then(r => r.json())
     showLogin(!status.bootstrapped)  // no users → show register; has users → show login
-  } catch { showLogin(false) }
+  } catch { showLogin(true) }  // default to register if status check fails
 }
 init()
 </script>

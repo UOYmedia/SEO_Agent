@@ -25,9 +25,12 @@ async def lifespan(app: FastAPI):
     try:
         create_tables()
         logger.info("Database tables ready")
+    except Exception as e:
+        logger.error(f"DB table creation failed: {e}", exc_info=True)
+    try:
         _bootstrap_superadmin()
     except Exception as e:
-        logger.warning(f"DB init warning (non-fatal): {e}")
+        logger.error(f"Superadmin bootstrap failed: {e}", exc_info=True)
     yield
 
 
@@ -66,6 +69,14 @@ app = FastAPI(
     description="AI-powered SEO content agent for Shopify / WooCommerce",
     lifespan=lifespan,
 )
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled error on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 app.add_middleware(
     CORSMiddleware,
