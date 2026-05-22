@@ -8,7 +8,8 @@ from app.config import settings
 
 
 class ImageGenerator:
-    VALID_SIZES = {"1024x1024", "1792x1024", "1024x1792"}
+    # gpt-image-1 valid sizes
+    VALID_SIZES = {"1024x1024", "1536x1024", "1024x1536", "auto"}
 
     def __init__(self):
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -16,21 +17,21 @@ class ImageGenerator:
     def generate(
         self,
         prompt: str,
-        size: str = "1792x1024",
+        size: str = "1536x1024",
         response_format: str = "url",  # kept for call-site compat, ignored
     ) -> dict:
         """
-        Generate a banner with DALL-E 3.
+        Generate a banner with gpt-image-1.
         Returns {"url": str, "revised_prompt": str}.
         """
         if size not in self.VALID_SIZES:
-            size = "1792x1024"
+            size = "1536x1024"
 
         response = self.client.images.generate(
-            model="dall-e-3",
+            model="gpt-image-1",
             prompt=prompt,
             size=size,
-            quality="standard",
+            quality="medium",
             n=1,
         )
         item = response.data[0]
