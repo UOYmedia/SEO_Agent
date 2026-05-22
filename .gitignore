@@ -35,3 +35,4 @@ Thumbs.db
 # Generated images / temp
 generated_images/
 temp/
+app/static/uploads/
