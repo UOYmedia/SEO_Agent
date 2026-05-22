@@ -22,7 +22,7 @@ async def init_shopify(
     Crawl all blog posts from Shopify and store in local DB.
     Safe to re-run — existing posts are updated, not duplicated.
     """
-    crawler = ShopifyCrawler(shop_domain=shop_domain, access_token=access_token)
+    crawler = ShopifyCrawler(shop_domain=shop_domain, access_token=access_token, db=db)
 
     if not crawler.shop_domain or not crawler.access_token:
         raise HTTPException(

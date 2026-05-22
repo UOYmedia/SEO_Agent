@@ -48,9 +48,18 @@ class ShopifyCrawler:
         self,
         shop_domain: Optional[str] = None,
         access_token: Optional[str] = None,
+        db=None,
     ):
+        from sqlalchemy.orm import Session
         self.shop_domain = (shop_domain or settings.SHOPIFY_SHOP_DOMAIN).strip().rstrip("/")
-        self.access_token = access_token or settings.SHOPIFY_ACCESS_TOKEN
+        # Token priority: explicit arg → DB (OAuth) → env var
+        if access_token:
+            self.access_token = access_token
+        elif db:
+            from app.api.auth_routes import get_store_token
+            self.access_token = get_store_token(self.shop_domain, db)
+        else:
+            self.access_token = settings.SHOPIFY_ACCESS_TOKEN
         self.api_version = settings.SHOPIFY_API_VERSION
         self.endpoint = f"https://{self.shop_domain}/admin/api/{self.api_version}/graphql.json"
 
