@@ -17,12 +17,11 @@ class ImageGenerator:
         self,
         prompt: str,
         size: str = "1792x1024",
-        response_format: str = "b64_json",
+        response_format: str = "url",  # kept for call-site compat, ignored
     ) -> dict:
         """
         Generate a banner with DALL-E 3.
-        response_format: "b64_json" (for upload) or "url" (1-hr temp link).
-        Returns {"b64_data": str|None, "url": str|None, "revised_prompt": str}.
+        Returns {"url": str, "revised_prompt": str}.
         """
         if size not in self.VALID_SIZES:
             size = "1792x1024"
@@ -33,11 +32,9 @@ class ImageGenerator:
             size=size,
             quality="standard",
             n=1,
-            response_format=response_format,
         )
         item = response.data[0]
         return {
-            "b64_data": getattr(item, "b64_json", None),
             "url": getattr(item, "url", None),
             "revised_prompt": getattr(item, "revised_prompt", prompt),
         }
