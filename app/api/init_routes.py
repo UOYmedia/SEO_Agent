@@ -14,23 +14,30 @@ router = APIRouter(prefix="/api/v1/init", tags=["init"])
 
 @router.post("/shopify", response_model=SyncResult)
 async def init_shopify(
-    shop_domain: Optional[str] = Query(None, description="Override shop domain from env"),
-    access_token: Optional[str] = Query(None, description="Override access token from env"),
+    shop_domain: str = Query(..., description="Shop to sync, e.g. flagwix.myshopify.com"),
     fetch_metafields: bool = Query(False, description="Also fetch SEO metafields (slower)"),
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Crawl all blog posts from Shopify and store in local DB.
-    Safe to re-run — existing posts are updated, not duplicated.
+    Crawl all blog posts from the given Shopify store into the local DB.
+    Requires write access to the store. Safe to re-run — existing posts
+    are updated, not duplicated.
     """
-    crawler = ShopifyCrawler(shop_domain=shop_domain, access_token=access_token, db=db)
+    shop = shop_domain.strip().lower()
+    check_store_scope(user, shop, "write", db)
 
-    if not crawler.shop_domain or not crawler.access_token:
+    from app.api.auth_routes import get_store_token
+    from app.models.shopify_store import ShopifyStore
+
+    store = db.query(ShopifyStore).filter_by(shop_domain=shop).first()
+    if not store or not store.access_token:
         raise HTTPException(
-            status_code=422,
-            detail="SHOPIFY_SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN must be set (env or query params)",
+            422,
+            f"No saved access token for {shop}. Ask an admin to connect this store first.",
         )
 
+    crawler = ShopifyCrawler(shop_domain=shop, access_token=store.access_token, db=db)
     stats = await crawler.sync_all(db, fetch_metafields=fetch_metafields)
     return SyncResult(**stats)
 
