@@ -1415,6 +1415,7 @@ async function initGscTab() {
 }
 
 async function loadGscData() {
+  const shopParam = S.currentShop ? `&shop_domain=${encodeURIComponent(S.currentShop)}` : ''
   const dayBtns = document.getElementById('gsc-day-btns')
   if (dayBtns) {
     dayBtns.innerHTML = [7,28,90].map(d =>
