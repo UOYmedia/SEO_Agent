@@ -19,7 +19,6 @@ mutation ArticleCreate($article: ArticleCreateInput!) {
     article {
       id
       handle
-      onlineStoreUrl
       image { url altText }
     }
     userErrors { field message }
