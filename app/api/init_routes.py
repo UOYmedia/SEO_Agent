@@ -40,11 +40,23 @@ blog_router = APIRouter(prefix="/api/v1/blogs", tags=["blogs"])
 
 
 @blog_router.get("/channels")
-def list_channels(db: Session = Depends(get_db)):
+def list_channels(
+    shop_domain: Optional[str] = Query(None, description="Filter by shop domain"),
+    db: Session = Depends(get_db),
+):
     """List all synced blog channels (blogs). Used to pick blog_id for publishing."""
-    channels = db.query(BlogChannel).order_by(BlogChannel.title).all()
+    q = db.query(BlogChannel)
+    if shop_domain:
+        q = q.filter(BlogChannel.shop_domain == shop_domain)
+    channels = q.order_by(BlogChannel.title).all()
     return [
-        {"id": c.id, "platform_id": c.platform_id, "title": c.title, "handle": c.handle}
+        {
+            "id": c.id,
+            "platform_id": c.platform_id,
+            "shop_domain": c.shop_domain,
+            "title": c.title,
+            "handle": c.handle,
+        }
         for c in channels
     ]
 
@@ -54,6 +66,7 @@ def list_posts(
     platform: Optional[Platform] = None,
     source: Optional[str] = Query(None, description="'synced' | 'generated'"),
     keyword: Optional[str] = None,
+    shop_domain: Optional[str] = Query(None, description="Filter by shop domain"),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -65,6 +78,8 @@ def list_posts(
         q = q.filter(BlogPost.platform == platform)
     if source:
         q = q.filter(BlogPost.source == source)
+    if shop_domain:
+        q = q.filter(BlogPost.shop_domain == shop_domain)
     if keyword:
         q = q.filter(
             BlogPost.title.ilike(f"%{keyword}%")

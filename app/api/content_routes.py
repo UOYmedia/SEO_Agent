@@ -168,6 +168,7 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
         platform=body.platform,
         channel_id=body.blog_channel_id,
         cluster_id=body.cluster_id,
+        shop_domain=body.shop_domain or None,
     )
 
     return {

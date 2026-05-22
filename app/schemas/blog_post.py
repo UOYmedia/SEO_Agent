@@ -10,6 +10,7 @@ class BlogChannelOut(BaseModel):
     id: int
     platform: Platform
     platform_id: str
+    shop_domain: Optional[str] = None
     title: Optional[str]
     handle: Optional[str]
     synced_at: datetime
@@ -23,6 +24,7 @@ class BlogPostOut(BaseModel):
     platform: Platform
     platform_id: Optional[str]
     platform_url: Optional[str]
+    shop_domain: Optional[str] = None
     channel_id: Optional[int]
     title: str
     slug: Optional[str]
