@@ -240,9 +240,10 @@ function loading(el, html) { if (el) el.innerHTML = html }
 // ═══════════════════════ DASHBOARD ═══════════════════════════
 async function renderDashboard() {
   const isAdmin = S.user?.role === 'admin'
+  const hasShop = !!S.currentShop
   document.getElementById('header-actions').innerHTML =
     `${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="openConnectModal()">🔗 Connect Shopify</button>` : ''}
-     <button class="btn btn-primary btn-sm" id="sync-btn" onclick="syncShopify()">🔄 Sync</button>`
+     <button class="btn btn-primary btn-sm" id="sync-btn" onclick="syncShopify()" ${hasShop ? '' : 'disabled'} title="${hasShop ? 'Sync ' + S.currentShop : 'Select a store first'}">🔄 Sync${hasShop ? ' ' + S.currentShop : ''}</button>`
 
   document.getElementById('content').innerHTML = `
     <div id="shopify-status-bar" class="mb-4"></div>
@@ -325,15 +326,19 @@ async function renderDashboard() {
 }
 
 async function syncShopify() {
+  if (!S.currentShop) {
+    toast('Select a store to sync first', 'error')
+    return
+  }
   const btn = document.getElementById('sync-btn')
   btn.disabled = true
-  btn.innerHTML = `<span class="spinner"></span> Syncing…`
+  btn.innerHTML = `<span class="spinner"></span> Syncing ${S.currentShop}…`
   try {
-    const r = await POST('/api/v1/init/shopify')
-    toast(`✅ Synced: ${r.articles_synced} new · ${r.articles_updated} updated`, 'success')
+    const r = await POST(`/api/v1/init/shopify?shop_domain=${encodeURIComponent(S.currentShop)}`)
+    toast(`✅ ${S.currentShop}: ${r.articles_synced} new · ${r.articles_updated} updated`, 'success')
     renderDashboard()
   } catch(e) { toast('Sync failed: ' + e.message, 'error') }
-  finally { btn.disabled = false; btn.innerHTML = '🔄 Sync Shopify' }
+  finally { btn.disabled = false; btn.innerHTML = '🔄 Sync' }
 }
 
 // ═══════════════════════ BLOG POSTS ══════════════════════════
