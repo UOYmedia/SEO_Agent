@@ -112,15 +112,16 @@ class ContentWriter:
 Writing rules:
 - Write in {language}, tone: {tone_instruction}
 - Target {word_count}+ words
-- Use focus keyword in: H1, first 100 words, at least 2 H2s, naturally throughout (2-3% density)
-- Structure: intro → H2 sections → FAQ (from PAA) → conclusion
+- NEVER use <h1> tags — Shopify automatically generates H1 from the article title
+- Use focus keyword in: first 100 words, at least 2 <h2> headings, naturally throughout (2-3% density)
+- Structure: intro paragraph → <h2> sections → FAQ (from PAA) → conclusion paragraph
 - Use proper HTML tags: <h2>, <h3>, <p>, <ul>, <li>, <strong>
 - Never use <html>, <head>, <body> tags
 - End with a <section class="faq"> containing PAA questions as <h3> + <p> answers{lessons_ctx}{kb_context}"""
 
-        user = f"""Write a complete SEO article:
+        user = f"""Write a complete SEO article (do NOT include an H1 — the title is handled by the platform):
 
-**Title (H1):** {title}
+**Article title:** {title}
 **Focus keyword:** {focus_keyword}
 
 **Outline:**
@@ -217,13 +218,24 @@ Respond in this exact format:
 
         # Inject internal links used
         internal_links_used = [p.id for p in internal_posts]
+        image_prompt = meta.get("image_prompt", f"Professional blog banner about {focus_keyword}")
+
+        # Generate featured image immediately so the user can review it
+        image_url = None
+        try:
+            from app.services.image_generator import ImageGenerator
+            img = ImageGenerator().generate(image_prompt)
+            image_url = img.get("url")
+        except Exception:
+            pass
 
         return {
             "content_html": content_html,
             "seo_title": meta.get("seo_title", title[:60]),
             "seo_description": meta.get("meta_description", ""),
             "tags": meta.get("tags", []),
-            "image_prompt": meta.get("image_prompt", f"Professional blog banner about {focus_keyword}"),
+            "image_prompt": image_prompt,
+            "image_url": image_url,
             "internal_links": internal_links_used,
             "usage": {
                 "input_tokens": message.usage.prompt_tokens,
@@ -346,6 +358,7 @@ Respond in this exact format:
             focus_keyword=focus_keyword,
             tags=result["tags"],
             image_prompt=result.get("image_prompt"),
+            featured_image_url=result.get("image_url"),
             internal_links=result["internal_links"],
             status=PostStatus.DRAFT,
             source="generated",

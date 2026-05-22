@@ -625,12 +625,13 @@ async function submitFeedback(postId) {
 function openPublishModal(postId, title) {
   const chOpts = S.channels.map(c =>
     `<option value="${esc(c.platform_id)}">${esc(c.title)} (ID: ${c.platform_id})</option>`).join('')
+  const savedBlogId = localStorage.getItem(`seo_pref_blogid_${S.currentShop}`) || ''
 
   openModal(`Publish: ${title}`, `
     <div class="space-y-4">
       <div>
         <label>Shopify Blog ID <span class="text-red-500">*</span></label>
-        <input type="number" id="pub-blog-id" placeholder="e.g. 12345678">
+        <input type="number" id="pub-blog-id" placeholder="e.g. 12345678" value="${savedBlogId}">
         ${chOpts ? `<select class="mt-2" onchange="document.getElementById('pub-blog-id').value=this.value">
           <option value="">— Pick from synced blogs —</option>${chOpts}
         </select>` : `<div class="text-xs text-gray-400 mt-1">Shopify Admin → Online Store → Blog posts → copy numeric ID from URL</div>`}
@@ -670,6 +671,7 @@ async function doPublish(postId) {
       ? { blog_id: blogId, shop_domain: S.currentShop || null, author, published, generate_image: true }
       : { blog_id: blogId, shop_domain: S.currentShop || null, author, published }
     const r = await POST(endpoint, body)
+    localStorage.setItem(`seo_pref_blogid_${S.currentShop}`, blogId)
     closeModal()
     toast(`✅ Published! ${r.platform_url || ''}`, 'success')
     if (S.page === 'posts') loadPosts()
@@ -1019,6 +1021,9 @@ async function renderGenerate() {
     </div>`
 
   renderOutline()
+  // Restore saved channel selection per shop
+  const prefChannel = S.currentShop ? localStorage.getItem(`seo_pref_channel_${S.currentShop}`) : null
+  if (prefChannel) { const sel = document.getElementById('gen-channel'); if (sel) sel.value = prefChannel }
   if (S.generated) showGenerateResult(S.generated)
 }
 
@@ -1029,19 +1034,54 @@ function selectGenBrand(domain) {
   if (desc) desc.textContent = brand?.brand_description || ''
 }
 
+let _dragIdx = null
+
 function renderOutline() {
   const el = document.getElementById('outline-list')
   if (!el) return
   el.innerHTML = outlineItems.map((item, i) => `
-    <div class="flex gap-2">
-      <input type="text" value="${esc(item)}" placeholder="H2 section…" oninput="outlineItems[${i}]=this.value">
+    <div class="flex gap-1 items-center outline-row" draggable="true" data-idx="${i}"
+      ondragstart="outlineDragStart(event,${i})"
+      ondragover="outlineDragOver(event)"
+      ondragleave="outlineDragLeave(event)"
+      ondrop="outlineDrop(event,${i})"
+      ondragend="outlineDragEnd(event)"
+      style="border-top:2px solid transparent;border-radius:4px">
+      <span title="Drag to reorder" style="cursor:grab;color:#d1d5db;font-size:18px;padding:4px 2px;user-select:none;line-height:1">⠿</span>
+      <input type="text" class="flex-1" value="${esc(item)}" placeholder="H2 section…" oninput="outlineItems[${i}]=this.value">
       ${outlineItems.length > 1
-        ? `<button class="btn btn-secondary btn-sm shrink-0" onclick="removeOutlineItem(${i})" style="min-width:36px">✕</button>`
+        ? `<button class="btn btn-secondary btn-sm shrink-0" onclick="removeOutlineItem(${i})" style="min-width:32px;padding:4px 8px">✕</button>`
         : ''}
     </div>`).join('')
 }
-function addOutlineItem()        { outlineItems.push(''); renderOutline() }
-function removeOutlineItem(i)    { outlineItems.splice(i,1); renderOutline() }
+
+function outlineDragStart(e, idx) {
+  _dragIdx = idx
+  e.dataTransfer.effectAllowed = 'move'
+  setTimeout(() => e.currentTarget && (e.currentTarget.style.opacity = '0.4'), 0)
+}
+function outlineDragOver(e) {
+  e.preventDefault()
+  e.dataTransfer.dropEffect = 'move'
+  e.currentTarget.style.borderTop = '2px solid #6366f1'
+}
+function outlineDragLeave(e) { e.currentTarget.style.borderTop = '2px solid transparent' }
+function outlineDragEnd(e) {
+  e.currentTarget.style.opacity = ''
+  document.querySelectorAll('.outline-row').forEach(r => r.style.borderTop = '2px solid transparent')
+}
+function outlineDrop(e, targetIdx) {
+  e.preventDefault()
+  outlineDragEnd(e)
+  if (_dragIdx === null || _dragIdx === targetIdx) { _dragIdx = null; return }
+  const [moved] = outlineItems.splice(_dragIdx, 1)
+  outlineItems.splice(targetIdx, 0, moved)
+  _dragIdx = null
+  renderOutline()
+}
+
+function addOutlineItem()     { outlineItems.push(''); renderOutline() }
+function removeOutlineItem(i) { outlineItems.splice(i, 1); renderOutline() }
 
 async function doGenerate() {
   const title   = document.getElementById('gen-title').value.trim()
@@ -1054,20 +1094,22 @@ async function doGenerate() {
 
   const btn = document.getElementById('gen-btn')
   btn.disabled = true
-  btn.innerHTML = `<span class="spinner"></span> Generating with GPT-4o…`
+  btn.innerHTML = `<span class="spinner"></span> Generating article + image…`
 
   document.getElementById('gen-result').innerHTML = `
     <div class="card flex items-center justify-center text-center" style="min-height:300px">
       <div>
         <div class="spinner-dark mx-auto mb-4"></div>
-        <div class="text-sm text-gray-600 font-medium">GPT-4o is writing your article…</div>
-        <div class="text-xs text-gray-400 mt-1">Typically 20–40 seconds</div>
+        <div class="text-sm text-gray-600 font-medium">GPT-4o is writing your article + generating image…</div>
+        <div class="text-xs text-gray-400 mt-1">Typically 40–60 seconds</div>
       </div>
     </div>`
 
   try {
     const channelId = document.getElementById('gen-channel').value
     const brandDomain = document.getElementById('gen-brand')?.value || S.selectedBrandDomain
+    // Remember channel selection per shop
+    if (channelId && S.currentShop) localStorage.setItem(`seo_pref_channel_${S.currentShop}`, channelId)
     const r = await POST('/api/v1/generate/article', {
       title, focus_keyword: keyword, outline,
       language:        document.getElementById('gen-lang').value,
@@ -1102,12 +1144,12 @@ function showGenerateResult(r) {
         <div><span class="text-gray-400">Meta desc:</span> ${esc(r.seo_description||'—')}</div>
         <div><span class="text-gray-400">Tags:</span> ${(r.tags||[]).join(', ')||'—'}</div>
         <div><span class="text-gray-400">Internal links:</span> ${r.internal_links_count||0}</div>
-        <div><span class="text-gray-400">Tokens in/out:</span> ${r.usage?.input_tokens||0} / ${r.usage?.output_tokens||0}</div>
+        <div><span class="text-gray-400">Tokens:</span> ${r.usage?.input_tokens||0} in / ${r.usage?.output_tokens||0} out</div>
       </div>
 
-      <div class="text-xs bg-purple-50 border border-purple-100 rounded-lg p-3">
-        <div class="text-purple-700 font-medium mb-1">🎨 DALL·E Image Prompt</div>
-        <div class="text-gray-600 leading-relaxed">${esc(r.image_prompt||'—')}</div>
+      <!-- Images section -->
+      <div id="gen-img-panel-${r.id}">
+        ${_imgSlotHtml(r.id, 'featured', r.image_prompt||'', r.image_url||null)}
       </div>
 
       <div class="text-xs text-gray-400 bg-gray-50 rounded-lg p-2" style="max-height:80px;overflow:hidden">
@@ -1132,6 +1174,65 @@ function showGenerateResult(r) {
         <div id="qfb-status-${r.id}" class="text-xs text-gray-400 mt-1"></div>
       </div>
     </div>`
+}
+
+function _imgSlotHtml(postId, slot, prompt, url) {
+  const label = slot === 'featured' ? '🖼 Featured Image' : `🖼 ${slot}`
+  return `<div class="border border-gray-100 rounded-xl overflow-hidden" id="img-slot-${postId}-${slot}">
+    <div class="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-100">
+      <span class="text-xs font-medium text-gray-600">${label}</span>
+      <div class="flex gap-1">
+        <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="openRegenerateImg(${postId},'${slot}')">🔄 Regenerate</button>
+        ${slot === 'featured' ? `<button class="btn btn-sm" style="font-size:11px;padding:2px 8px;background:#f3f4f6;color:#374151" onclick="openAddImgSlot(${postId})">+ Add image</button>` : ''}
+      </div>
+    </div>
+    ${url
+      ? `<img src="${esc(url)}" alt="${esc(prompt)}" class="w-full object-cover" style="max-height:220px">`
+      : `<div class="flex items-center justify-center text-gray-400 text-xs py-8 bg-gray-50">No image generated</div>`}
+    <div class="px-3 py-1.5 text-xs text-gray-400 bg-gray-50 border-t border-gray-100 truncate" title="${esc(prompt)}">${esc(prompt||'—')}</div>
+  </div>`
+}
+
+async function openRegenerateImg(postId, slot) {
+  const promptInput = prompt(`Edit image prompt for "${slot}" (leave blank to reuse existing):`, '')
+  if (promptInput === null) return  // user cancelled
+  const el = document.getElementById(`img-slot-${postId}-${slot}`)
+  if (el) el.innerHTML = `<div class="flex items-center justify-center py-8 text-xs text-gray-400"><span class="spinner-dark mr-2"></span> Generating…</div>`
+  try {
+    const r = await POST(`/api/v1/generate/article/${postId}/regenerate-image`, {
+      slot, prompt: promptInput || undefined, size: '1536x1024'
+    })
+    // Update slot HTML
+    if (el) el.outerHTML = _imgSlotHtml(postId, slot, r.prompt, r.image_url)
+    // Also update S.generated
+    if (S.generated?.id === postId) {
+      if (slot === 'featured') S.generated.image_url = r.image_url
+    }
+    toast('✅ Image regenerated', 'success')
+  } catch(e) {
+    toast('Image generation failed: ' + e.message, 'error')
+    if (el) el.innerHTML = `<div class="text-red-400 text-xs p-3">Error: ${esc(e.message)}</div>`
+  }
+}
+
+function openAddImgSlot(postId) {
+  const label = window.prompt('Section label for this image (e.g. "section-2", "comparison"):')
+  if (!label || !label.trim()) return
+  const customPrompt = window.prompt('Image prompt (or leave blank for auto):') || ''
+  const panel = document.getElementById(`gen-img-panel-${postId}`)
+  if (!panel) return
+  const div = document.createElement('div')
+  div.id = `img-slot-${postId}-${label.trim()}`
+  div.innerHTML = `<div class="flex items-center justify-center py-8 text-xs text-gray-400 border rounded-xl mt-2"><span class="spinner-dark mr-2"></span> Generating…</div>`
+  panel.appendChild(div)
+  POST(`/api/v1/generate/article/${postId}/regenerate-image`, {
+    slot: label.trim(), prompt: customPrompt || undefined, size: '1536x1024'
+  }).then(r => {
+    div.outerHTML = `<div class="mt-2">${_imgSlotHtml(postId, r.slot, r.prompt, r.image_url)}</div>`
+    toast('✅ Image added', 'success')
+  }).catch(e => {
+    div.innerHTML = `<div class="text-red-400 text-xs p-3">Error: ${esc(e.message)}</div>`
+  })
 }
 
 async function quickRate(postId, rating) {

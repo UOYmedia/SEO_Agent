@@ -45,7 +45,8 @@ def _migrate_columns():
         inspector = inspect(engine)
 
         add_cols("blog_posts", [
-            ("image_prompt", "TEXT"),
+            ("image_prompt",   "TEXT"),
+            ("extra_images",   "TEXT"),
         ])
 
         add_cols("brand_profiles", [
