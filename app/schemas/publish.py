@@ -7,18 +7,3 @@ class PublishToShopifyRequest(BaseModel):
     shop_domain: Optional[str] = Field(None, description="Target store domain")
     author: str = "SEO Agent"
     published: bool = True
-
-
-class GenerateImageRequest(BaseModel):
-    prompt: Optional[str] = Field(None, description="Override stored image_prompt")
-    size: str = Field("1792x1024", description="1024x1024 | 1792x1024 | 1024x1792")
-
-
-class FullPublishRequest(BaseModel):
-    blog_id: int = Field(..., description="Shopify blog ID (channel platform_id)")
-    shop_domain: Optional[str] = Field(None, description="Target store domain")
-    author: str = "SEO Agent"
-    published: bool = True
-    generate_image: bool = True
-    image_prompt: Optional[str] = Field(None, description="Override stored image_prompt")
-    image_size: str = "1536x1024"
