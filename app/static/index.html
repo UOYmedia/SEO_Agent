@@ -1809,26 +1809,91 @@ function prefillRankingCheck(keyword) {
 function openConnectModal() {
   openModal('Connect Shopify Store', `
     <div class="space-y-4">
-      <p class="text-sm text-gray-600">Enter your Shopify store domain to start the OAuth authorization flow.</p>
-      <div>
-        <label>Shop Domain</label>
-        <input type="text" id="connect-shop" placeholder="yourstore.myshopify.com" value="${esc(S.shopDomain||'')}">
+      <!-- Tabs -->
+      <div class="flex gap-1 bg-gray-100 p-1 rounded-xl text-sm">
+        <button id="ct-tab-token" onclick="switchConnectTab('token')"
+          class="flex-1 py-1.5 rounded-lg font-medium bg-white shadow text-gray-800">🔑 Custom App Token</button>
+        <button id="ct-tab-oauth" onclick="switchConnectTab('oauth')"
+          class="flex-1 py-1.5 rounded-lg font-medium text-gray-500">🔐 OAuth (Partner App)</button>
       </div>
-      <div class="text-xs text-gray-400 bg-gray-50 rounded-lg p-3 space-y-1">
-        <div>📋 <strong>Before connecting, make sure in Partner Dashboard:</strong></div>
-        <div>• App setup → App URL = <code>${window.location.origin}/auth/shopify</code></div>
-        <div>• Allowed redirection URLs = <code>${window.location.origin}/auth/shopify/callback</code></div>
+
+      <!-- Custom App Token tab -->
+      <div id="ct-panel-token" class="space-y-3">
+        <p class="text-sm text-gray-600">Cách đơn giản nhất — tạo Custom App trong Shopify Admin để lấy token.</p>
+        <div>
+          <label>Shop Domain <span class="text-red-500">*</span></label>
+          <input type="text" id="connect-shop-token" placeholder="yourstore.myshopify.com" value="${esc(S.shopDomain||'')}">
+        </div>
+        <div>
+          <label>Access Token <span class="text-red-500">*</span></label>
+          <input type="password" id="connect-token" placeholder="shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+        </div>
+        <div class="text-xs text-gray-400 bg-blue-50 rounded-lg p-3 space-y-1">
+          <div>📋 <strong>Cách lấy token:</strong></div>
+          <div>1. Shopify Admin → Settings → Apps and sales channels</div>
+          <div>2. Develop apps → Create an app → Configure Admin API scopes</div>
+          <div>3. Bật: <code>read_content</code>, <code>write_content</code></div>
+          <div>4. Install app → lấy <strong>Admin API access token</strong></div>
+        </div>
+      </div>
+
+      <!-- OAuth tab -->
+      <div id="ct-panel-oauth" class="space-y-3 hidden">
+        <p class="text-sm text-gray-600">Dùng khi bạn đã setup Shopify Partner App với OAuth.</p>
+        <div>
+          <label>Shop Domain <span class="text-red-500">*</span></label>
+          <input type="text" id="connect-shop-oauth" placeholder="yourstore.myshopify.com" value="${esc(S.shopDomain||'')}">
+        </div>
+        <div class="text-xs text-gray-400 bg-gray-50 rounded-lg p-3 space-y-1">
+          <div>📋 <strong>Partner Dashboard phải có:</strong></div>
+          <div>• App URL = <code>${window.location.origin}/auth/shopify</code></div>
+          <div>• Allowed redirection URLs = <code>${window.location.origin}/auth/shopify/callback</code></div>
+        </div>
       </div>
     </div>`,
     `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
-     <button class="btn btn-primary btn-sm" onclick="doConnect()">🔗 Authorize →</button>`)
+     <button class="btn btn-primary btn-sm" id="do-connect-btn" onclick="doConnect()">🔗 Connect Store</button>`)
+  // store active tab
+  window._connectTab = 'token'
 }
 
-function doConnect() {
-  const shop = document.getElementById('connect-shop').value.trim()
+function switchConnectTab(tab) {
+  window._connectTab = tab
+  document.getElementById('ct-panel-token').classList.toggle('hidden', tab !== 'token')
+  document.getElementById('ct-panel-oauth').classList.toggle('hidden', tab !== 'oauth')
+  document.getElementById('ct-tab-token').className = `flex-1 py-1.5 rounded-lg font-medium ${tab==='token' ? 'bg-white shadow text-gray-800' : 'text-gray-500'}`
+  document.getElementById('ct-tab-oauth').className = `flex-1 py-1.5 rounded-lg font-medium ${tab==='oauth' ? 'bg-white shadow text-gray-800' : 'text-gray-500'}`
+}
+
+async function doConnect() {
+  const tab = window._connectTab || 'token'
+  if (tab === 'oauth') {
+    const shop = document.getElementById('connect-shop-oauth').value.trim()
+    if (!shop) { toast('Enter shop domain', 'error'); return }
+    S.shopDomain = shop
+    window.location.href = `/auth/shopify?shop=${encodeURIComponent(shop)}`
+    return
+  }
+  // Custom App Token
+  const shop = document.getElementById('connect-shop-token').value.trim()
+  const token = document.getElementById('connect-token').value.trim()
   if (!shop) { toast('Enter shop domain', 'error'); return }
-  S.shopDomain = shop
-  window.location.href = `/auth/shopify?shop=${encodeURIComponent(shop)}`
+  if (!token) { toast('Enter access token', 'error'); return }
+  const btn = document.getElementById('do-connect-btn')
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Connecting…'
+  try {
+    await POST('/auth/shopify/connect-token', { shop_domain: shop, access_token: token })
+    closeModal()
+    toast(`✅ ${shop} connected!`, 'success')
+    // Refresh store list
+    S.myStores = await GET('/api/v1/users/stores/accessible')
+    const sel = document.getElementById('store-selector')
+    if (sel) sel.innerHTML = S.myStores.map(s => `<option value="${esc(s.shop_domain)}">${esc(s.shop_domain)}</option>`).join('')
+    selectShop(shop)
+  } catch(e) {
+    toast('Connect failed: ' + e.message, 'error')
+    btn.disabled = false; btn.innerHTML = '🔗 Connect Store'
+  }
 }
 
 // ══════════════════════════ AUTH ═════════════════════════════

@@ -178,6 +178,38 @@ def shopify_debug_url(shop: str = Query("example.myshopify.com")):
     }
 
 
+# ── Manual token connect (Custom App) ────────────────────────────────────────
+
+from pydantic import BaseModel as _Base
+
+class _ConnectTokenBody(_Base):
+    shop_domain: str
+    access_token: str
+
+
+@auth_router.post("/shopify/connect-token")
+def shopify_connect_token(body: _ConnectTokenBody, db: Session = Depends(get_db)):
+    """
+    Save a Shopify Custom App token directly — no OAuth needed.
+    Use this when you created a Custom App in Shopify Admin and have the token.
+    """
+    shop = body.shop_domain.strip().lower()
+    if not shop or not body.access_token:
+        raise HTTPException(422, "shop_domain and access_token are required")
+    if not shop.endswith(".myshopify.com"):
+        raise HTTPException(422, "shop_domain must end with .myshopify.com")
+
+    store = db.query(ShopifyStore).filter_by(shop_domain=shop).first()
+    if not store:
+        store = ShopifyStore(shop_domain=shop)
+        db.add(store)
+    store.access_token = body.access_token
+    store.scope = "custom_app"
+    store.installed_at = datetime.utcnow()
+    db.commit()
+    return {"shop_domain": shop, "connected": True}
+
+
 # ── Status endpoint ───────────────────────────────────────────────────────────
 
 @auth_router.get("/shopify/status")
