@@ -21,4 +21,4 @@ class FullPublishRequest(BaseModel):
     published: bool = True
     generate_image: bool = True
     image_prompt: Optional[str] = Field(None, description="Override stored image_prompt")
-    image_size: str = "1792x1024"
+    image_size: str = "1536x1024"
