@@ -1,4 +1,5 @@
 import re
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -177,6 +178,7 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
         "seo_description": post.seo_description,
         "tags": post.tags,
         "image_prompt": result["image_prompt"],
+        "image_url": result.get("image_url"),
         "platform_url": post.platform_url,
         "status": post.status,
         "source": post.source,
@@ -184,6 +186,42 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
         "usage": result["usage"],
         "content_preview": result["content_html"][:500] + "...",
     }
+
+
+@generate_router.post("/article/{post_id}/regenerate-image")
+async def regenerate_image(
+    post_id: int,
+    body: "_RegenerateImageBody",
+    db: Session = Depends(get_db),
+):
+    """Generate a new image for a draft post. slot='featured' or a custom label."""
+    from app.models.blog_post import BlogPost
+    from app.services.image_generator import ImageGenerator
+
+    post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+
+    prompt = body.prompt or post.image_prompt or f"Professional blog banner for: {post.title}"
+    size = body.size if body.size in {"1024x1024", "1536x1024", "1024x1536"} else "1536x1024"
+
+    img = ImageGenerator().generate(prompt, size=size)
+    url = img.get("url")
+
+    if not body.slot or body.slot == "featured":
+        post.featured_image_url = url
+    else:
+        extra = list(post.extra_images or [])
+        existing = next((e for e in extra if e.get("label") == body.slot), None)
+        if existing:
+            existing["url"] = url
+            existing["prompt"] = prompt
+        else:
+            extra.append({"label": body.slot, "prompt": prompt, "url": url})
+        post.extra_images = extra
+
+    db.commit()
+    return {"image_url": url, "slot": body.slot or "featured", "prompt": prompt}
 
 
 @generate_router.post("/article/{post_id}/rewrite")
@@ -271,6 +309,12 @@ class _RewriteBody(_Base):
     shop_domain: str = ""
 
 
+class _RegenerateImageBody(_Base):
+    slot: str = "featured"          # 'featured' or a custom section label
+    prompt: Optional[str] = None    # override; falls back to post.image_prompt
+    size: str = "1536x1024"
+
+
 @generate_router.get("/article/{post_id}/content")
 def get_article_content(post_id: int, db: Session = Depends(get_db)):
     """Get full HTML content of a generated article."""
@@ -286,6 +330,9 @@ def get_article_content(post_id: int, db: Session = Depends(get_db)):
         "seo_description": post.seo_description,
         "tags": post.tags,
         "status": post.status,
+        "image_prompt": post.image_prompt,
+        "featured_image_url": post.featured_image_url,
+        "extra_images": post.extra_images or [],
     }
 
 
