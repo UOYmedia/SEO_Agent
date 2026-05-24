@@ -45,12 +45,24 @@ class GenerateArticleRequest(BaseModel):
     paa_questions: list[str] = []
     cluster_id: Optional[int] = None
     language: str = "en"
+    market: str = "us"
     tone: str = "professional"
     word_count: int = 1500
+    notes: Optional[str] = None
+    article_type: Optional[str] = None
     platform: Platform = Platform.SHOPIFY
     blog_channel_id: Optional[int] = None
     shop_domain: Optional[str] = None
     auto_publish: bool = False
+
+
+class TitleSuggestionRequest(BaseModel):
+    focus_keyword: str
+    notes: Optional[str] = None
+    language: str = "en"
+    market: str = "us"
+    article_type: Optional[str] = None
+    count: int = 5
 
 
 class GeneratedArticleOut(BaseModel):

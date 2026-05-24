@@ -260,15 +260,10 @@ def store_keyword_suggestions(
     from app.models.blog_post import BlogPost, Platform
     from app.services.keyword_suggester import generate_suggestions
 
-    posts = db.query(BlogPost).filter(
+    store_posts = db.query(BlogPost).filter(
         BlogPost.platform == Platform.SHOPIFY,
+        BlogPost.shop_domain == shop_domain,
     ).all()
-    # Filter by shop domain via channel
-    # (BlogPost doesn't have shop_domain directly; use platform_url prefix as proxy)
-    store_posts = [
-        p for p in posts
-        if p.platform_url and shop_domain in p.platform_url
-    ] or posts  # fallback: all posts if no URL match yet
 
     try:
         return generate_suggestions(store_posts, shop_domain)

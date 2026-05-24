@@ -24,6 +24,7 @@ class BlogChannel(Base):
     id = Column(Integer, primary_key=True, index=True)
     platform = Column(Enum(Platform), nullable=False)
     platform_id = Column(String(100), nullable=False)
+    shop_domain = Column(String(255), index=True)
     title = Column(String(500))
     handle = Column(String(500))
     commentable = Column(String(50))
@@ -43,6 +44,7 @@ class BlogPost(Base):
     platform = Column(Enum(Platform), nullable=False)
     platform_id = Column(String(100), index=True)        # Shopify article ID
     platform_url = Column(Text)
+    shop_domain = Column(String(255), index=True)
     channel_id = Column(Integer, ForeignKey("blog_channels.id"))
 
     # Content

@@ -11,8 +11,10 @@ from app.schemas.content import (
     GeneratedArticleOut,
     KeywordResearchOut,
     KeywordResearchRequest,
+    TitleSuggestionRequest,
     TopicPlanRequest,
 )
+from app.services.auth_service import check_store_scope, get_current_user
 from app.services.content_writer import ContentWriter
 from app.services.keyword_analyzer import KeywordAnalyzer
 from app.services.topic_planner import TopicPlanner
@@ -75,6 +77,24 @@ def get_topic_cluster(cluster_id: int, db: Session = Depends(get_db)):
 
 
 # ── Content Generation ────────────────────────────────────────────────────────
+
+@generate_router.post("/title")
+def suggest_titles(body: TitleSuggestionRequest, user=Depends(get_current_user)):
+    """Generate SEO-friendly title suggestions for a focus keyword."""
+    if not body.focus_keyword.strip():
+        raise HTTPException(422, "focus_keyword is required")
+    titles = ContentWriter().suggest_titles(
+        focus_keyword=body.focus_keyword.strip(),
+        language=body.language,
+        market=body.market,
+        article_type=body.article_type,
+        notes=body.notes,
+        count=max(1, min(body.count, 10)),
+    )
+    if not titles:
+        raise HTTPException(502, "Title suggestion failed — model returned no parseable output")
+    return {"titles": titles}
+
 
 @generate_router.post("/article")
 async def generate_article(body: GenerateArticleRequest, db: Session = Depends(get_db)):
@@ -156,6 +176,9 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
         brand_profile=brand_profile,
         feedback_lessons=feedback_lessons,
         shop_domain=body.shop_domain or None,
+        notes=body.notes,
+        market=body.market,
+        article_type=body.article_type,
     )
 
     # Save draft to DB
@@ -193,6 +216,7 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
 async def regenerate_image(
     post_id: int,
     body: "_RegenerateImageBody",
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Generate a new image for a draft post. slot='featured' or a custom label."""
@@ -202,6 +226,8 @@ async def regenerate_image(
     post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
     if not post:
         raise HTTPException(404, "Post not found")
+    if post.shop_domain:
+        check_store_scope(user, post.shop_domain, "write", db)
 
     prompt = body.prompt or post.image_prompt or f"Professional blog banner for: {post.title}"
     size = body.size if body.size in {"1024x1024", "1536x1024", "1024x1536"} else "1536x1024"
@@ -211,6 +237,8 @@ async def regenerate_image(
 
     if not body.slot or body.slot == "featured":
         post.featured_image_url = url
+        post.featured_image_alt = post.title
+        post.image_prompt = prompt
     else:
         extra = list(post.extra_images or [])
         existing = next((e for e in extra if e.get("label") == body.slot), None)
@@ -348,14 +376,34 @@ class _UpdateBody(_Base):
 
 
 @generate_router.put("/article/{post_id}")
-def update_article(post_id: int, body: _UpdateBody, db: Session = Depends(get_db)):
-    """Update a draft article's content and metadata."""
+def update_article(
+    post_id: int,
+    body: _UpdateBody,
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update a draft article's content and metadata. Records an edit history entry."""
+    import difflib
+
+    from app.models.article_edit_history import ArticleEditHistory
     from app.models.blog_post import BlogPost, PostStatus
+
     post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
     if not post:
         raise HTTPException(404, "Post not found")
+    if post.shop_domain:
+        check_store_scope(user, post.shop_domain, "write", db)
     if post.status != PostStatus.DRAFT:
         raise HTTPException(422, "Only draft posts can be edited")
+
+    # Snapshot before applying
+    before = {
+        "title":           post.title,
+        "content_html":    post.content_html or "",
+        "seo_title":       post.seo_title,
+        "seo_description": post.seo_description,
+        "tags":            list(post.tags or []),
+    }
 
     if body.title:
         post.title = body.title
@@ -366,6 +414,51 @@ def update_article(post_id: int, body: _UpdateBody, db: Session = Depends(get_db
     if body.seo_description:
         post.seo_description = body.seo_description
     post.tags = body.tags
+
+    after = {
+        "title":           post.title,
+        "content_html":    post.content_html or "",
+        "seo_title":       post.seo_title,
+        "seo_description": post.seo_description,
+        "tags":            list(post.tags or []),
+    }
+
+    diff_lines = list(difflib.unified_diff(
+        before["content_html"].splitlines(),
+        after["content_html"].splitlines(),
+        lineterm="",
+        n=2,
+    ))
+    added   = sum(1 for l in diff_lines if l.startswith("+") and not l.startswith("+++"))
+    removed = sum(1 for l in diff_lines if l.startswith("-") and not l.startswith("---"))
+
+    changed_fields = [k for k in ("title", "seo_title", "seo_description") if before[k] != after[k]]
+    if before["tags"] != after["tags"]:
+        changed_fields.append("tags")
+    content_changed = bool(diff_lines)
+
+    if changed_fields or content_changed:
+        parts = list(changed_fields)
+        if content_changed:
+            parts.append(f"content +{added}/-{removed}")
+        history = ArticleEditHistory(
+            post_id=post.id,
+            user_id=user.id,
+            shop_domain=post.shop_domain,
+            title_before=          before["title"]           if "title" in changed_fields else None,
+            title_after=           after["title"]            if "title" in changed_fields else None,
+            seo_title_before=      before["seo_title"]       if "seo_title" in changed_fields else None,
+            seo_title_after=       after["seo_title"]        if "seo_title" in changed_fields else None,
+            seo_description_before=before["seo_description"] if "seo_description" in changed_fields else None,
+            seo_description_after= after["seo_description"]  if "seo_description" in changed_fields else None,
+            tags_before=           before["tags"]            if "tags" in changed_fields else None,
+            tags_after=            after["tags"]             if "tags" in changed_fields else None,
+            content_diff="\n".join(diff_lines) if content_changed else None,
+            lines_added=added,
+            lines_removed=removed,
+            summary="; ".join(parts)[:500],
+        )
+        db.add(history)
 
     db.commit()
     db.refresh(post)
@@ -407,23 +500,24 @@ class FeedbackBody(_Base):
 def submit_feedback(
     post_id: int,
     body: FeedbackBody,
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     from app.models.article_feedback import ArticleFeedback
     from app.models.blog_post import BlogPost
-    from app.services.auth_service import get_current_user
-    from fastapi import Header
-    import re
 
     if not 1 <= body.rating <= 5:
         raise HTTPException(422, "Rating must be 1–5")
     post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
     if not post:
         raise HTTPException(404, "Post not found")
+    if post.shop_domain:
+        check_store_scope(user, post.shop_domain, "read", db)
 
     fb = ArticleFeedback(
         post_id=post_id,
-        shop_domain=body.shop_domain or None,
+        user_id=user.id,
+        shop_domain=body.shop_domain or post.shop_domain,
         rating=body.rating,
         feedback_text=body.feedback_text,
         improvement_notes=body.improvement_notes,
@@ -453,3 +547,75 @@ def get_feedback(post_id: int, db: Session = Depends(get_db)):
         }
         for f in items
     ]
+
+
+@generate_router.get("/article/{post_id}/history")
+def get_article_history(
+    post_id: int,
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Combined timeline of user edits + feedback for a post, newest first."""
+    from app.models.article_edit_history import ArticleEditHistory
+    from app.models.article_feedback import ArticleFeedback
+    from app.models.blog_post import BlogPost
+    from app.models.user import User
+
+    post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+    if post.shop_domain:
+        check_store_scope(user, post.shop_domain, "read", db)
+
+    edits = (
+        db.query(ArticleEditHistory)
+        .filter_by(post_id=post_id)
+        .order_by(ArticleEditHistory.created_at.desc())
+        .all()
+    )
+    feedbacks = (
+        db.query(ArticleFeedback)
+        .filter_by(post_id=post_id)
+        .order_by(ArticleFeedback.created_at.desc())
+        .all()
+    )
+
+    user_ids = {e.user_id for e in edits if e.user_id} | {f.user_id for f in feedbacks if f.user_id}
+    names = {}
+    if user_ids:
+        for u in db.query(User).filter(User.id.in_(user_ids)).all():
+            names[u.id] = u.name or u.email
+
+    timeline = []
+    for e in edits:
+        timeline.append({
+            "type": "edit",
+            "id": e.id,
+            "created_at": e.created_at,
+            "user": names.get(e.user_id) if e.user_id else None,
+            "summary": e.summary,
+            "lines_added": e.lines_added,
+            "lines_removed": e.lines_removed,
+            "title_before": e.title_before,
+            "title_after": e.title_after,
+            "seo_title_before": e.seo_title_before,
+            "seo_title_after": e.seo_title_after,
+            "seo_description_before": e.seo_description_before,
+            "seo_description_after": e.seo_description_after,
+            "tags_before": e.tags_before,
+            "tags_after": e.tags_after,
+            "content_diff": e.content_diff,
+        })
+    for f in feedbacks:
+        timeline.append({
+            "type": "feedback",
+            "id": f.id,
+            "created_at": f.created_at,
+            "user": names.get(f.user_id) if f.user_id else None,
+            "rating": f.rating,
+            "feedback_text": f.feedback_text,
+            "improvement_notes": f.improvement_notes,
+        })
+
+    timeline.sort(key=lambda x: x["created_at"], reverse=True)
+    return timeline

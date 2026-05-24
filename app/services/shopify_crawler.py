@@ -111,12 +111,21 @@ class ShopifyCrawler:
         numeric_id = self._gid_to_id(blog["id"])
         channel = (
             db.query(BlogChannel)
-            .filter_by(platform=Platform.SHOPIFY, platform_id=numeric_id)
+            .filter_by(
+                platform=Platform.SHOPIFY,
+                shop_domain=self.shop_domain,
+                platform_id=numeric_id,
+            )
             .first()
         )
         if not channel:
-            channel = BlogChannel(platform=Platform.SHOPIFY, platform_id=numeric_id)
+            channel = BlogChannel(
+                platform=Platform.SHOPIFY,
+                shop_domain=self.shop_domain,
+                platform_id=numeric_id,
+            )
             db.add(channel)
+        channel.shop_domain = self.shop_domain
         channel.title = blog.get("title")
         channel.handle = blog.get("handle")
         channel.synced_at = datetime.utcnow()
@@ -136,6 +145,7 @@ class ShopifyCrawler:
         return {
             "platform": Platform.SHOPIFY,
             "platform_id": numeric_id,
+            "shop_domain": self.shop_domain,
             "platform_url": (
                 f"https://{self.shop_domain}/blogs/{channel.handle}/{handle}"
                 if channel.handle and handle else None
@@ -161,7 +171,11 @@ class ShopifyCrawler:
     def _upsert_post(self, db: Session, data: dict) -> tuple[BlogPost, bool]:
         post = (
             db.query(BlogPost)
-            .filter_by(platform=Platform.SHOPIFY, platform_id=data["platform_id"])
+            .filter_by(
+                platform=Platform.SHOPIFY,
+                shop_domain=data["shop_domain"],
+                platform_id=data["platform_id"],
+            )
             .first()
         )
         if post:

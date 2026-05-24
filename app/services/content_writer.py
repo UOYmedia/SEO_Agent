@@ -21,16 +21,18 @@ class ContentWriter:
     # ── Internal link helpers ─────────────────────────────────────────────────
 
     def _find_related_posts(
-        self, db: Session, focus_keyword: str, tags: list[str], exclude_slug: str = None
+        self,
+        db: Session,
+        focus_keyword: str,
+        tags: list[str],
+        exclude_slug: str = None,
+        shop_domain: Optional[str] = None,
     ) -> list[BlogPost]:
-        """Find existing posts relevant for internal linking."""
-        posts = (
-            db.query(BlogPost)
-            .filter(BlogPost.platform_url.isnot(None))
-            .order_by(BlogPost.published_at.desc())
-            .limit(100)
-            .all()
-        )
+        """Find existing posts relevant for internal linking, scoped to the store."""
+        q = db.query(BlogPost).filter(BlogPost.platform_url.isnot(None))
+        if shop_domain:
+            q = q.filter(BlogPost.shop_domain == shop_domain)
+        posts = q.order_by(BlogPost.published_at.desc()).limit(100).all()
 
         kw_lower = focus_keyword.lower()
         scored = []
@@ -69,6 +71,9 @@ class ContentWriter:
         brand_profile: Optional[dict] = None,
         feedback_lessons: Optional[list] = None,
         kb_context: str = "",
+        notes: Optional[str] = None,
+        market: str = "us",
+        article_type: Optional[str] = None,
     ) -> tuple[str, str]:
         """Returns (system_prompt, user_prompt)."""
 
@@ -107,17 +112,26 @@ class ContentWriter:
             lessons_ctx = "\n\nLessons from feedback on previous articles (apply these):\n"
             lessons_ctx += "\n".join(f"- {l}" for l in feedback_lessons)
 
+        notes_ctx = ""
+        if notes and notes.strip():
+            notes_ctx = (
+                "\n\nUser notes for this specific article — follow these strictly:\n"
+                f"{notes.strip()}"
+            )
+
+        type_ctx = f"\n- Article type: {article_type}" if article_type else ""
+
         system = f"""You are a professional SEO content writer.{brand_ctx}
 
 Writing rules:
-- Write in {language}, tone: {tone_instruction}
+- Write in {language} for the {market.upper()} market, tone: {tone_instruction}{type_ctx}
 - Target {word_count}+ words
 - NEVER use <h1> tags — Shopify automatically generates H1 from the article title
 - Use focus keyword in: first 100 words, at least 2 <h2> headings, naturally throughout (2-3% density)
 - Structure: intro paragraph → <h2> sections → FAQ (from PAA) → conclusion paragraph
 - Use proper HTML tags: <h2>, <h3>, <p>, <ul>, <li>, <strong>
 - Never use <html>, <head>, <body> tags
-- End with a <section class="faq"> containing PAA questions as <h3> + <p> answers{lessons_ctx}{kb_context}"""
+- End with a <section class="faq"> containing PAA questions as <h3> + <p> answers{lessons_ctx}{notes_ctx}{kb_context}"""
 
         user = f"""Write a complete SEO article (do NOT include an H1 — the title is handled by the platform):
 
@@ -160,6 +174,9 @@ Respond in this exact format:
         brand_profile: Optional[dict] = None,
         feedback_lessons: Optional[list] = None,
         shop_domain: Optional[str] = None,
+        notes: Optional[str] = None,
+        market: str = "us",
+        article_type: Optional[str] = None,
     ) -> dict:
         """Generate SEO article with internal + external links."""
 
@@ -170,7 +187,7 @@ Respond in this exact format:
         internal_posts = []
         if db:
             internal_posts = self._find_related_posts(
-                db, focus_keyword, [], exclude_slug
+                db, focus_keyword, [], exclude_slug, shop_domain=shop_domain
             )
 
         # Knowledge base context (avoid duplicates, guide internal links)
@@ -190,6 +207,9 @@ Respond in this exact format:
             brand_profile=brand_profile,
             feedback_lessons=feedback_lessons,
             kb_context=kb_context,
+            notes=notes,
+            market=market,
+            article_type=article_type,
         )
 
         message = self.client.chat.completions.create(
@@ -242,6 +262,58 @@ Respond in this exact format:
                 "output_tokens": message.usage.completion_tokens,
             },
         }
+
+    # ── Title suggestions ─────────────────────────────────────────────────────
+
+    def suggest_titles(
+        self,
+        focus_keyword: str,
+        language: str = "en",
+        market: str = "us",
+        article_type: Optional[str] = None,
+        notes: Optional[str] = None,
+        count: int = 5,
+    ) -> list[str]:
+        """Return `count` SEO-optimized title suggestions."""
+        type_hint = f"\nArticle type: {article_type}" if article_type else ""
+        notes_hint = f"\nUser notes (incorporate these): {notes.strip()}" if notes and notes.strip() else ""
+
+        system = (
+            "You are an SEO title strategist. You generate blog article titles "
+            "that rank well on Google and earn clicks."
+        )
+        user = f"""Generate {count} SEO-optimized blog article titles in {language} for the {market.upper()} market.
+
+Focus keyword: {focus_keyword}{type_hint}{notes_hint}
+
+Rules:
+- 50–65 characters each (Google truncates past 60)
+- Include the focus keyword naturally (front-loaded if possible)
+- Include 1–2 supporting long-tail keywords or modifiers (year, benefit, audience, location) — but keep titles meaningful, not stuffed
+- Vary the angle across the {count} options: question, listicle, how-to, year-based, benefit-driven, comparison
+- Title-case for English; sentence-case for languages where that's standard
+- No clickbait
+
+Return ONLY a JSON array of {count} strings, no commentary. Example:
+["Best Wireless Earbuds for Running in 2025", "How to Pick Running Earbuds That Don't Fall Out"]"""
+
+        message = self.client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            max_tokens=600,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user",   "content": user},
+            ],
+        )
+        raw = (message.choices[0].message.content or "").strip()
+        match = re.search(r"\[.*\]", raw, re.DOTALL)
+        if not match:
+            return []
+        try:
+            titles = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return []
+        return [str(t).strip() for t in titles if isinstance(t, str) and t.strip()][:count]
 
     # ── Rewrite ───────────────────────────────────────────────────────────────
 
@@ -350,6 +422,7 @@ Respond in this exact format:
         post = BlogPost(
             platform=platform,
             platform_id=None,
+            shop_domain=shop_domain,
             channel_id=channel_id,
             shop_domain=shop_domain or None,
             title=title,

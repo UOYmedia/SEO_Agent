@@ -168,7 +168,29 @@ const S = {
   planResult: null,
   rankingKeywords: '',
 }
-let outlineItems = ['Giới thiệu', 'Nội dung chính', 'Lưu ý quan trọng', 'FAQ']
+let outlineItems = ['Introduction', 'Main content', 'Key takeaways', 'FAQ']
+
+// Outline templates keyed by article type. Selecting one replaces outlineItems.
+const OUTLINE_TEMPLATES = {
+  'qa':         ['Introduction', 'The main question explained', 'Detailed answer', 'Related questions people ask', 'Quick summary'],
+  'info':       ['Introduction', 'What is it?', 'Why it matters', 'How it works', 'Real-world examples', 'Key takeaways'],
+  'tips':       ['Introduction', 'Tip 1', 'Tip 2', 'Tip 3', 'Tip 4', 'Tip 5', 'Bonus tip', 'Conclusion'],
+  'fun_fact':   ['Introduction', 'Fact #1', 'Fact #2', 'Fact #3', 'Fact #4', 'Fact #5', 'Why these facts matter', 'Wrap-up'],
+  'product':    ['Introduction', 'The problem you face', 'Our solution', 'Key features', 'How to use it', 'Customer reviews', 'Where to buy'],
+  'listicle':   ['Introduction', '#1', '#2', '#3', '#4', '#5', 'Honorable mentions', 'Conclusion'],
+  'comparison': ['Introduction', 'Option A overview', 'Option B overview', 'Side-by-side comparison', 'Which one to choose', 'Final verdict'],
+  'howto':      ['Introduction', 'What you will need', 'Step 1', 'Step 2', 'Step 3', 'Common mistakes to avoid', 'Pro tips', 'Conclusion'],
+}
+const ARTICLE_TYPE_LABELS = {
+  qa: '❓ Q&A',
+  info: '📚 Informational',
+  tips: '💡 Tips & Tricks',
+  fun_fact: '🎲 Fun Facts',
+  product: '🛍 Product Promotion',
+  listicle: '📋 Listicle',
+  comparison: '⚖️ Comparison',
+  howto: '🛠 How-to Guide',
+}
 
 // ═══════════════════════════ API ═════════════════════════════
 const NO_AUTH_PATHS = ['/api/v1/users/login', '/api/v1/users/register', '/api/v1/users/setup-status']
@@ -240,9 +262,11 @@ function loading(el, html) { if (el) el.innerHTML = html }
 
 // ═══════════════════════ DASHBOARD ═══════════════════════════
 async function renderDashboard() {
+  const isAdmin = S.user?.role === 'admin'
+  const hasShop = !!S.currentShop
   document.getElementById('header-actions').innerHTML =
-    `<button class="btn btn-secondary btn-sm" onclick="openConnectModal()">🔗 Connect Shopify</button>
-     <button class="btn btn-primary btn-sm" id="sync-btn" onclick="syncShopify()">🔄 Sync</button>`
+    `${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="openConnectModal()">🔗 Connect Shopify</button>` : ''}
+     <button class="btn btn-primary btn-sm" id="sync-btn" onclick="syncShopify()" ${hasShop ? '' : 'disabled'} title="${hasShop ? 'Sync ' + S.currentShop : 'Select a store first'}">🔄 Sync${hasShop ? ' ' + S.currentShop : ''}</button>`
 
   document.getElementById('content').innerHTML = `
     <div id="shopify-status-bar" class="mb-4"></div>
@@ -279,9 +303,11 @@ async function renderDashboard() {
       </div>
     </div>`
 
-  // Load Shopify status
+  // Load Shopify connection status (admin sees all stores, member sees only their accessible ones)
   try {
-    const stores = await GET('/auth/shopify/status')
+    const stores = isAdmin
+      ? (await GET('/auth/shopify/status')).map(s => ({ shop: s.shop, scope: s.scope }))
+      : (await GET('/api/v1/users/stores/accessible')).map(s => ({ shop: s.shop_domain, scope: (s.scopes||[]).join(',') }))
     const bar = document.getElementById('shopify-status-bar')
     if (bar) {
       if (stores.length > 0) {
@@ -290,11 +316,16 @@ async function renderDashboard() {
             <span>✅</span>
             <span><strong>${esc(s.shop)}</strong> connected · scopes: ${esc(s.scope||'—')}</span>
           </div>`).join('')
-      } else {
+      } else if (isAdmin) {
         bar.innerHTML = `
           <div class="flex items-center justify-between text-sm bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-2">
             <span class="text-amber-800">⚠️ No Shopify store connected yet</span>
             <button class="btn btn-primary btn-sm" onclick="openConnectModal()">🔗 Connect Now</button>
+          </div>`
+      } else {
+        bar.innerHTML = `
+          <div class="flex items-center text-sm bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-2">
+            <span class="text-amber-800">⚠️ No store assigned to you yet. Contact an admin.</span>
           </div>`
       }
     }
@@ -302,18 +333,21 @@ async function renderDashboard() {
 
   // Load post stats + recent posts
   try {
-    const shopQ = S.currentShop ? `&shop_domain=${encodeURIComponent(S.currentShop)}` : ''
-    const [posts, clusters] = await Promise.all([
-      GET(`/api/v1/blogs/?limit=10&page=1${shopQ}`),
+    const sp = S.currentShop ? `&shop_domain=${encodeURIComponent(S.currentShop)}` : ''
+    const [postsResp, clusters] = await Promise.all([
+      GET(`/api/v1/blogs/?limit=10&page=1${sp}`),
       GET('/api/v1/topics/?limit=100'),
     ])
+    const posts = postsResp.items || []
+    const totalPosts = postsResp.total ?? posts.length
     const published = posts.filter(p => p.status === 'published').length
     const drafts    = posts.filter(p => p.status === 'draft').length
 
     document.getElementById('stat-cards').innerHTML = [
-      { icon: '✅', label: 'Published Posts', value: published, color: 'green',  onclick: "nav('posts')" },
-      { icon: '📋', label: 'Drafts',          value: drafts,   color: 'yellow', onclick: "nav('posts')" },
-      { icon: '🗂',  label: 'Topic Clusters',  value: clusters.length, color: 'purple', onclick: "nav('topics')" },
+      { icon: '📝', label: 'Total Posts',     value: totalPosts,       color: 'indigo' },
+      { icon: '✅', label: 'Published',        value: published,        color: 'green'  },
+      { icon: '📋', label: 'Drafts',           value: drafts,           color: 'yellow' },
+      { icon: '🗂', label: 'Topic Clusters',   value: clusters.length,  color: 'purple' },
     ].map(s => `
       <div class="card flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow" onclick="${s.onclick}">
         <div class="text-3xl">${s.icon}</div>
@@ -503,15 +537,19 @@ async function loadDashGsc(days) {
 }
 
 async function syncShopify() {
+  if (!S.currentShop) {
+    toast('Select a store to sync first', 'error')
+    return
+  }
   const btn = document.getElementById('sync-btn')
   btn.disabled = true
-  btn.innerHTML = `<span class="spinner"></span> Syncing…`
+  btn.innerHTML = `<span class="spinner"></span> Syncing ${S.currentShop}…`
   try {
-    const r = await POST('/api/v1/init/shopify')
-    toast(`✅ Synced: ${r.articles_synced} new · ${r.articles_updated} updated`, 'success')
+    const r = await POST(`/api/v1/init/shopify?shop_domain=${encodeURIComponent(S.currentShop)}`)
+    toast(`✅ ${S.currentShop}: ${r.articles_synced} new · ${r.articles_updated} updated`, 'success')
     renderDashboard()
   } catch(e) { toast('Sync failed: ' + e.message, 'error') }
-  finally { btn.disabled = false; btn.innerHTML = '🔄 Sync Shopify' }
+  finally { btn.disabled = false; btn.innerHTML = '🔄 Sync' }
 }
 
 // ═══════════════════════ BLOG POSTS ══════════════════════════
@@ -558,18 +596,25 @@ async function loadPosts() {
     page: S.postsPage, limit: 20,
     ...(S.postsSource && { source: S.postsSource }),
     ...(S.postsSearch && { keyword: S.postsSearch }),
-    ...(S.currentShop  && { shop_domain: S.currentShop }),
+    ...(S.currentShop && { shop_domain: S.currentShop }),
   })
   try {
-    let posts = await GET(`/api/v1/blogs/?${q}`)
+    const resp = await GET(`/api/v1/blogs/?${q}`)
+    let posts = resp.items || []
+    const total = resp.total ?? posts.length
+    const totalPages = resp.total_pages ?? 1
     if (S.postsStatus) posts = posts.filter(p => p.status === S.postsStatus)
     S.posts = posts
 
     const tbl = document.getElementById('posts-table')
+    const pager = document.getElementById('posts-pager')
     if (!tbl) return
 
     if (!posts.length) {
       tbl.innerHTML = `<div class="py-12 text-center text-gray-400 text-sm">No posts found.</div>`
+      if (pager) pager.innerHTML = total > 0
+        ? `<div>Filtered to 0 results from ${total} total — try clearing filters.</div><div></div>`
+        : ''
       return
     }
 
@@ -604,10 +649,31 @@ async function loadPosts() {
           </tr>`).join('')}
         </tbody>
       </table>`
+
+    if (pager) {
+      const from = (S.postsPage - 1) * 20 + 1
+      const to   = (S.postsPage - 1) * 20 + posts.length
+      const prevDisabled = S.postsPage <= 1
+      const nextDisabled = S.postsPage >= totalPages
+      pager.innerHTML = `
+        <div>Showing <strong>${from}–${to}</strong> of <strong>${total}</strong> post${total===1?'':'s'}</div>
+        <div class="flex items-center gap-2">
+          <button class="btn btn-secondary btn-sm" ${prevDisabled?'disabled':''} onclick="gotoPostsPage(${S.postsPage-1})">← Prev</button>
+          <span class="text-xs text-gray-400">Page ${S.postsPage} / ${totalPages || 1}</span>
+          <button class="btn btn-secondary btn-sm" ${nextDisabled?'disabled':''} onclick="gotoPostsPage(${S.postsPage+1})">Next →</button>
+        </div>`
+    }
   } catch(e) {
     const tbl = document.getElementById('posts-table')
     if (tbl) tbl.innerHTML = `<div class="text-red-500 text-sm py-4 text-center">Error: ${esc(e.message)}</div>`
   }
+}
+
+function gotoPostsPage(p) {
+  if (p < 1) return
+  S.postsPage = p
+  loadPosts()
+  window.scrollTo({top: 0, behavior: 'smooth'})
 }
 
 async function viewPost(id) {
@@ -622,6 +688,7 @@ async function viewPost(id) {
 
 function _renderViewPost(id, p) {
   document.getElementById('modal-title').textContent = p.title
+  const isDraft = p.status === 'draft'
   document.getElementById('modal-body').innerHTML = `
     <div class="flex gap-2 flex-wrap mb-3">${statusBadge(p.status)}</div>
     <div class="text-xs bg-gray-50 rounded-lg p-3 space-y-1 mb-3" id="meta-box">
@@ -629,6 +696,7 @@ function _renderViewPost(id, p) {
       <div><span class="text-gray-400">Meta:</span> ${esc(p.seo_description||'—')}</div>
       <div><span class="text-gray-400">Tags:</span> ${(p.tags||[]).join(', ')||'—'}</div>
     </div>
+    <div id="image-section" class="mb-3">${renderFeaturedImage(id, p, isDraft)}</div>
     <div class="border border-gray-200 rounded-xl overflow-hidden">
       <iframe id="preview-frame" class="w-full" style="height:380px" frameborder="0" sandbox="allow-same-origin allow-scripts"></iframe>
     </div>`
@@ -661,7 +729,17 @@ function _renderViewPost(id, p) {
       <textarea id="fb-improve" rows="2" placeholder="Improvement notes for future articles (the agent learns from this)…"></textarea>
       <button class="btn btn-secondary btn-sm mt-2" onclick="submitFeedback(${id})">Send Feedback</button>
       <div id="fb-status" class="text-xs text-gray-400 mt-1"></div>
+    </div>
+
+    <div class="mt-4 border-t pt-4">
+      <div class="flex justify-between items-center mb-2">
+        <div class="text-sm font-semibold text-gray-700">🕓 History</div>
+        <button class="text-xs text-indigo-500 hover:underline" onclick="loadArticleHistory(${id})">↻ Refresh</button>
+      </div>
+      <div id="history-list" class="text-xs text-gray-500">${skeletons(2)}</div>
     </div>`
+
+  loadArticleHistory(id)
 
   document.getElementById('modal-footer').innerHTML = `
     ${p.status === 'draft' ? `
@@ -695,6 +773,7 @@ async function editPost(id) {
         <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Tags <span class="text-gray-400 font-normal">(comma-separated)</span></label>
         <input id="ed-tags" class="input mt-1" value="${esc((p.tags||[]).join(', '))}">
       </div>
+      <div id="image-section">${renderFeaturedImage(id, p, true)}</div>
       <div>
         <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Content HTML</label>
         <textarea id="ed-content" rows="14" class="mt-1" style="font-family:monospace;font-size:12px">${esc(p.content_html||'')}</textarea>
@@ -814,14 +893,142 @@ async function submitFeedback(postId) {
     document.getElementById('fb-status').textContent = '✅ Feedback saved! The agent will apply these improvements to future articles.'
     document.getElementById('fb-status').className = 'text-xs text-green-600 mt-1'
     _fbRating = 0
+    loadArticleHistory(postId)
   } catch(e) { toast('Failed to save feedback: ' + e.message, 'error') }
 }
 
+// ─────────────────── History timeline ────────────────────────
+async function loadArticleHistory(postId) {
+  const box = document.getElementById('history-list')
+  if (!box) return
+  try {
+    const items = await GET(`/api/v1/generate/article/${postId}/history`)
+    if (!items.length) {
+      box.innerHTML = `<div class="py-3 text-center text-gray-400">No edits or feedback yet.</div>`
+      return
+    }
+    box.innerHTML = items.map((it, i) => it.type === 'feedback'
+      ? renderHistoryFeedback(it)
+      : renderHistoryEdit(it, i)
+    ).join('')
+  } catch(e) {
+    box.innerHTML = `<div class="text-red-500 py-2">Error: ${esc(e.message)}</div>`
+  }
+}
+
+function renderHistoryFeedback(it) {
+  const stars = '★'.repeat(it.rating) + '☆'.repeat(5 - it.rating)
+  return `
+    <div class="border-l-2 border-amber-300 pl-3 py-2 mb-2 bg-amber-50/40 rounded-r">
+      <div class="flex justify-between items-center">
+        <div class="text-amber-600 font-medium">${stars} <span class="text-gray-600 ml-1">Feedback</span></div>
+        <div class="text-[10px] text-gray-400">${fmtTime(it.created_at)}${it.user ? ' · ' + esc(it.user) : ''}</div>
+      </div>
+      ${it.feedback_text     ? `<div class="mt-1 text-gray-700">${esc(it.feedback_text)}</div>` : ''}
+      ${it.improvement_notes ? `<div class="mt-1 text-gray-500 italic">💡 ${esc(it.improvement_notes)}</div>` : ''}
+    </div>`
+}
+
+function renderHistoryEdit(it, i) {
+  const metaRows = []
+  if (it.title_before !== null && it.title_after !== null)
+    metaRows.push(`<div><span class="text-gray-400">Title:</span> <s class="text-red-500">${esc(it.title_before||'—')}</s> → <span class="text-green-700">${esc(it.title_after||'—')}</span></div>`)
+  if (it.seo_title_before !== null && it.seo_title_after !== null)
+    metaRows.push(`<div><span class="text-gray-400">SEO Title:</span> <s class="text-red-500">${esc(it.seo_title_before||'—')}</s> → <span class="text-green-700">${esc(it.seo_title_after||'—')}</span></div>`)
+  if (it.seo_description_before !== null && it.seo_description_after !== null)
+    metaRows.push(`<div><span class="text-gray-400">Meta:</span> <s class="text-red-500">${esc(it.seo_description_before||'—')}</s> → <span class="text-green-700">${esc(it.seo_description_after||'—')}</span></div>`)
+  if (it.tags_before !== null && it.tags_after !== null)
+    metaRows.push(`<div><span class="text-gray-400">Tags:</span> <s class="text-red-500">${esc((it.tags_before||[]).join(', '))}</s> → <span class="text-green-700">${esc((it.tags_after||[]).join(', '))}</span></div>`)
+  const hasDiff = !!it.content_diff
+  return `
+    <div class="border-l-2 border-indigo-300 pl-3 py-2 mb-2 bg-indigo-50/40 rounded-r">
+      <div class="flex justify-between items-center">
+        <div class="text-indigo-600 font-medium">✏️ Edit · ${esc(it.summary || '(no summary)')}</div>
+        <div class="text-[10px] text-gray-400">${fmtTime(it.created_at)}${it.user ? ' · ' + esc(it.user) : ''}</div>
+      </div>
+      ${metaRows.length ? `<div class="mt-1 space-y-0.5">${metaRows.join('')}</div>` : ''}
+      ${hasDiff ? `
+        <button class="mt-1 text-[11px] text-indigo-500 hover:underline" onclick="this.nextElementSibling.classList.toggle('hidden')">
+          Show content diff (+${it.lines_added}/-${it.lines_removed})
+        </button>
+        <pre class="hidden mt-1 text-[11px] bg-white border rounded p-2 max-h-60 overflow-auto whitespace-pre-wrap">${esc(it.content_diff)}</pre>
+      ` : ''}
+    </div>`
+}
+
+function fmtTime(iso) {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString()
+  } catch { return iso || '' }
+}
+
+// ─────────────────── Featured image ──────────────────────────
+function renderFeaturedImage(postId, p, canEdit) {
+  const url = p.featured_image_url
+  const prompt = p.image_prompt || ''
+  const imgHtml = url
+    ? `<img src="${esc(url)}" alt="${esc(p.title)}"
+         class="w-full rounded-xl border border-gray-200 object-cover" style="max-height:280px">`
+    : `<div class="w-full rounded-xl border border-dashed border-gray-300 bg-gray-50 text-gray-400 text-sm flex items-center justify-center" style="height:140px">
+         No featured image yet${canEdit ? ' — click "Generate image" below' : ''}
+       </div>`
+  return `
+    <div class="text-sm font-semibold text-gray-700 mb-2">🖼 Featured Image</div>
+    ${imgHtml}
+    ${canEdit ? `
+      <details class="mt-2">
+        <summary class="text-xs text-indigo-500 cursor-pointer hover:underline">
+          ${url ? '🎨 Regenerate image' : '🎨 Generate image'} — edit prompt
+        </summary>
+        <div class="mt-2 space-y-2">
+          <textarea id="img-prompt-${postId}" rows="3" class="text-xs"
+            placeholder="DALL·E prompt — describe the banner you want">${esc(prompt)}</textarea>
+          <button class="btn btn-secondary btn-sm" onclick="doRegenerateImage(${postId})" id="img-gen-btn-${postId}">
+            ${url ? '🔄 Regenerate' : '🎨 Generate'}
+          </button>
+          <div id="img-status-${postId}" class="text-xs text-gray-400"></div>
+        </div>
+      </details>
+    ` : ''}`
+}
+
+async function doRegenerateImage(postId) {
+  const ta = document.getElementById(`img-prompt-${postId}`)
+  const btn = document.getElementById(`img-gen-btn-${postId}`)
+  const status = document.getElementById(`img-status-${postId}`)
+  const prompt = ta?.value.trim() || ''
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Generating…'
+  status.textContent = 'Calling DALL·E 3 — ~10–20 seconds'
+  try {
+    const r = await POST(`/api/v1/generate/article/${postId}/regenerate-image`, {
+      slot: 'featured',
+      prompt: prompt || null,
+      size: '1536x1024',
+    })
+    // Re-render the image section in place using the latest post payload
+    const fresh = await GET(`/api/v1/generate/article/${postId}/content`)
+    const section = document.getElementById('image-section')
+    if (section) section.innerHTML = renderFeaturedImage(postId, fresh, true)
+    toast('✅ Image updated', 'success')
+  } catch(e) {
+    btn.disabled = false; btn.innerHTML = '🔄 Regenerate'
+    status.textContent = '❌ ' + e.message
+  }
+}
+
 // ─────────────────── Publish modal ────────────────────────────
-function openPublishModal(postId, title) {
+async function openPublishModal(postId, title) {
   const chOpts = S.channels.map(c =>
     `<option value="${esc(c.platform_id)}">${esc(c.title)} (ID: ${c.platform_id})</option>`).join('')
   const savedBlogId = localStorage.getItem(`seo_pref_blogid_${S.currentShop}`) || ''
+
+  // Check if the draft already has a featured image
+  let hasImage = false
+  try {
+    const p = await GET(`/api/v1/generate/article/${postId}/content`)
+    hasImage = !!p.featured_image_url
+  } catch {}
 
   openModal(`Publish: ${title}`, `
     <div class="space-y-4">
@@ -836,9 +1043,10 @@ function openPublishModal(postId, title) {
         <label>Author</label>
         <input type="text" id="pub-author" value="${esc(S.user?.name || 'SEO Agent')}">
       </div>
-      <div class="flex items-center gap-3 py-1">
-        <input type="checkbox" id="pub-image" checked class="w-4 h-4 rounded accent-indigo-600">
-        <label for="pub-image" class="!mb-0 cursor-pointer">Generate DALL·E 3 banner image</label>
+      <div class="flex items-center gap-2 text-xs ${hasImage ? 'text-green-700 bg-green-50 border-green-200' : 'text-amber-700 bg-amber-50 border-amber-200'} border rounded-lg px-3 py-2">
+        ${hasImage
+          ? '🖼 Featured image is set — will be uploaded to Shopify.'
+          : '⚠️ No featured image set. The article will publish without one. Add an image in the draft view first.'}
       </div>
       <div class="flex items-center gap-3 py-1">
         <input type="checkbox" id="pub-live" checked class="w-4 h-4 rounded accent-indigo-600">
@@ -853,20 +1061,17 @@ async function doPublish(postId) {
   const blogId = parseInt(document.getElementById('pub-blog-id').value)
   if (!blogId) { toast('Enter a Shopify Blog ID', 'error'); return }
 
-  const genImage  = document.getElementById('pub-image').checked
   const published = document.getElementById('pub-live').checked
   const author    = document.getElementById('pub-author').value
 
   const btn = document.getElementById('do-pub-btn')
   btn.disabled = true
-  btn.innerHTML = `<span class="spinner"></span> ${genImage ? 'Generating image…' : 'Publishing…'}`
+  btn.innerHTML = `<span class="spinner"></span> Publishing…`
 
   try {
-    const endpoint = genImage ? `/api/v1/publish/${postId}/full` : `/api/v1/publish/${postId}/shopify`
-    const body = genImage
-      ? { blog_id: blogId, shop_domain: S.currentShop || null, author, published, generate_image: true }
-      : { blog_id: blogId, shop_domain: S.currentShop || null, author, published }
-    const r = await POST(endpoint, body)
+    const r = await POST(`/api/v1/publish/${postId}/shopify`, {
+      blog_id: blogId, shop_domain: S.currentShop || null, author, published,
+    })
     localStorage.setItem(`seo_pref_blogid_${S.currentShop}`, blogId)
     closeModal()
     toast(`✅ Published! ${r.platform_url || ''}`, 'success')
@@ -1131,6 +1336,9 @@ async function renderGenerate() {
     </option>`).join('')
   const selectedBrand = S.allBrands.find(b => b.shop_domain === S.selectedBrandDomain)
 
+  const typeOpts = Object.entries(ARTICLE_TYPE_LABELS)
+    .map(([v, label]) => `<option value="${v}">${label}</option>`).join('')
+
   document.getElementById('content').innerHTML = `
     <div class="grid gap-6" style="grid-template-columns:1fr 320px">
       <!-- Left: form -->
@@ -1139,16 +1347,26 @@ async function renderGenerate() {
           <div class="text-sm font-semibold text-gray-700 mb-4">Article Details</div>
           <div class="space-y-3">
             <div>
-              <label>Article Title</label>
-              <input type="text" id="gen-title" placeholder="e.g. Top 10 Đồng Hồ Cơ Nam 2025">
-            </div>
-            <div>
               <label>Focus Keyword</label>
-              <input type="text" id="gen-kw" placeholder="e.g. đồng hồ cơ nam">
+              <input type="text" id="gen-kw" placeholder="e.g. wireless earbuds for running">
             </div>
             <div>
-              <label>Outline (one H2 section per line)</label>
-              <div id="outline-list" class="space-y-2"></div>
+              <div class="flex items-center justify-between">
+                <label class="!mb-0">Article Title</label>
+                <button class="text-xs text-indigo-500 hover:underline" onclick="suggestTitles()">✨ Suggest titles</button>
+              </div>
+              <input type="text" id="gen-title" placeholder="Click ✨ Suggest titles or write your own (SEO 50–65 chars)">
+              <div id="gen-title-suggestions" class="mt-2 space-y-1"></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between">
+                <label class="!mb-0">Outline (one H2 section per line)</label>
+                <select id="gen-type" onchange="applyOutlineTemplate(this.value)" class="!w-auto text-xs" style="padding:4px 8px">
+                  <option value="">📑 Pick a template…</option>
+                  ${typeOpts}
+                </select>
+              </div>
+              <div id="outline-list" class="space-y-2 mt-2"></div>
               <button class="btn btn-secondary btn-sm mt-2" onclick="addOutlineItem()">+ Add Section</button>
             </div>
           </div>
@@ -1158,7 +1376,24 @@ async function renderGenerate() {
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label>Language</label>
-              <select id="gen-lang"><option value="vi">Vietnamese</option><option value="en">English</option></select>
+              <select id="gen-lang">
+                <option value="en" selected>English</option>
+                <option value="vi">Vietnamese</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+              </select>
+            </div>
+            <div>
+              <label>Market</label>
+              <select id="gen-market">
+                <option value="us" selected>🇺🇸 United States</option>
+                <option value="uk">🇬🇧 United Kingdom</option>
+                <option value="ca">🇨🇦 Canada</option>
+                <option value="au">🇦🇺 Australia</option>
+                <option value="in">🇮🇳 India</option>
+                <option value="vn">🇻🇳 Vietnam</option>
+              </select>
             </div>
             <div>
               <label>Tone</label>
@@ -1173,12 +1408,17 @@ async function renderGenerate() {
               <label>Word Count</label>
               <input type="number" id="gen-words" value="1500" min="800" max="5000">
             </div>
-            <div>
+            <div class="col-span-2">
               <label>Blog Channel</label>
               <select id="gen-channel">
                 <option value="">— None —</option>
                 ${S.channels.map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('')}
               </select>
+            </div>
+            <div class="col-span-2">
+              <label>📝 Notes (steer the AI)</label>
+              <textarea id="gen-notes" rows="3"
+                placeholder="Anything the AI must follow — e.g.:&#10;• Mention our 30-day money-back guarantee&#10;• Avoid comparing to Brand X&#10;• Use a casual, Gen-Z voice in the intro"></textarea>
             </div>
           </div>
         </div>
@@ -1221,6 +1461,42 @@ async function renderGenerate() {
   const prefChannel = S.currentShop ? localStorage.getItem(`seo_pref_channel_${S.currentShop}`) : null
   if (prefChannel) { const sel = document.getElementById('gen-channel'); if (sel) sel.value = prefChannel }
   if (S.generated) showGenerateResult(S.generated)
+}
+
+function applyOutlineTemplate(key) {
+  if (!key || !OUTLINE_TEMPLATES[key]) return
+  outlineItems = [...OUTLINE_TEMPLATES[key]]
+  renderOutline()
+  toast(`Loaded "${ARTICLE_TYPE_LABELS[key]}" template`, 'success')
+}
+
+async function suggestTitles() {
+  const kw = document.getElementById('gen-kw').value.trim()
+  if (!kw) { toast('Enter a focus keyword first', 'error'); return }
+  const box = document.getElementById('gen-title-suggestions')
+  box.innerHTML = `<div class="text-xs text-gray-400 flex items-center gap-2"><span class="spinner"></span> Generating titles…</div>`
+  try {
+    const r = await POST('/api/v1/generate/title', {
+      focus_keyword: kw,
+      language:     document.getElementById('gen-lang').value,
+      market:       document.getElementById('gen-market').value,
+      article_type: document.getElementById('gen-type')?.value || null,
+      notes:        document.getElementById('gen-notes')?.value || null,
+      count: 5,
+    })
+    box.innerHTML = r.titles.map(t => `
+      <button class="w-full text-left text-xs px-2 py-1.5 rounded border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 transition"
+        onclick="useGenTitle(${JSON.stringify(t).replace(/"/g,'&quot;')})">
+        ${esc(t)} <span class="text-gray-400">(${t.length} chars)</span>
+      </button>`).join('')
+  } catch(e) {
+    box.innerHTML = `<div class="text-xs text-red-500">${esc(e.message)}</div>`
+  }
+}
+
+function useGenTitle(title) {
+  document.getElementById('gen-title').value = title
+  document.getElementById('gen-title-suggestions').innerHTML = ''
 }
 
 function selectGenBrand(domain) {
@@ -1309,8 +1585,11 @@ async function doGenerate() {
     const r = await POST('/api/v1/generate/article', {
       title, focus_keyword: keyword, outline,
       language:        document.getElementById('gen-lang').value,
+      market:          document.getElementById('gen-market')?.value || 'us',
       tone:            document.getElementById('gen-tone').value,
       word_count:      parseInt(document.getElementById('gen-words').value),
+      notes:           document.getElementById('gen-notes')?.value?.trim() || null,
+      article_type:    document.getElementById('gen-type')?.value || null,
       blog_channel_id: channelId ? parseInt(channelId) : null,
       shop_domain:     brandDomain || S.currentShop || null,
     })
@@ -1500,7 +1779,8 @@ async function runBlogAudit() {
   const btn = document.getElementById('audit-btn')
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Auditing…'
   try {
-    const data = await GET('/api/v1/audit/posts')
+    const sp = S.currentShop ? `?shop_domain=${encodeURIComponent(S.currentShop)}` : ''
+    const data = await GET(`/api/v1/audit/posts${sp}`)
     S.auditResults = data
     renderAuditBlogResults(data)
   } catch(e) { toast('Audit failed: ' + e.message, 'error') }
@@ -2003,6 +2283,10 @@ function prefillRankingCheck(keyword) {
 
 // ═══════════════════ SHOPIFY CONNECT ═════════════════════════
 async function openConnectModal() {
+  if (S.user?.role !== 'admin') {
+    toast('Only admins can connect Shopify stores', 'error')
+    return
+  }
   // Load saved OAuth settings before rendering modal
   let oauthCfg = { api_key: '', api_secret: '', app_url: window.location.origin }
   try { oauthCfg = await GET('/api/v1/settings/oauth') } catch {}
@@ -2108,7 +2392,13 @@ async function doConnect() {
       return
     }
     S.shopDomain = shop
-    window.location.href = `/auth/shopify?shop=${encodeURIComponent(shop)}`
+    try {
+      const { install_url } = await POST('/auth/shopify/install-url', { shop })
+      window.location.href = install_url
+    } catch(e) {
+      toast('Failed to start install: ' + e.message, 'error')
+      btn.disabled = false; btn.innerHTML = '🔗 Connect Store'
+    }
     return
   }
   // Custom App Token
@@ -2234,21 +2524,26 @@ async function afterLogin() {
     if (!S.currentShop && S.myStores.length > 0) selectShop(S.myStores[0].shop_domain)
   } catch { S.myStores = [] }
 
-  try { S.channels = await GET('/api/v1/blogs/channels') } catch { S.channels = [] }
+  await loadChannelsForShop()
   nav('dashboard')
 }
 
-function selectShop(shop) {
+async function loadChannelsForShop() {
+  const sp = S.currentShop ? `?shop_domain=${encodeURIComponent(S.currentShop)}` : ''
+  try { S.channels = await GET(`/api/v1/blogs/channels${sp}`) } catch { S.channels = [] }
+}
+
+async function selectShop(shop) {
   S.currentShop = shop
   localStorage.setItem('seo_shop', shop)
   const sel = document.getElementById('store-selector')
   if (sel) sel.value = shop
   S.auditResults = null; S.rankingResults = null; S.planResult = null
   S.brandProfile = null; S.allBrands = []; S.selectedBrandDomain = null
-  if (S.page === 'audit')     renderAudit()
-  if (S.page === 'brand')     renderBrand()
-  if (S.page === 'posts')     loadPosts()
-  if (S.page === 'dashboard') renderDashboard()
+  S.posts = null; S.postsPage = 1
+  await loadChannelsForShop()
+  // Refresh whatever page the user is on so data reflects the new store
+  if (typeof nav === 'function' && S.page) nav(S.page)
 }
 
 // ══════════════════════ KNOWLEDGE BASE ═══════════════════════
