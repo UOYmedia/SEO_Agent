@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SEO Agent</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .nav-link {
@@ -374,44 +373,132 @@ async function renderDashboard() {
   loadDashGsc()
 }
 
-// ─────────────── Dashboard GSC Panel ─────────────────────────
-let _dashChart = null
+// ─── Pure-SVG line chart (no external library) ────────────────
+function drawSvgChart(container, sparkline, days) {
+  const W = container.clientWidth || 700
+  const H = 220
+  const PAD = { top: 24, right: 56, bottom: 32, left: 48 }
+  const pw = W - PAD.left - PAD.right
+  const ph = H - PAD.top  - PAD.bottom
+
+  const clicks = sparkline.map(r => r.clicks)
+  const impr   = sparkline.map(r => r.impressions)
+  const maxClk = Math.max(...clicks, 1)
+  const maxImp = Math.max(...impr,   1)
+  const n      = sparkline.length
+
+  const xPos = i => PAD.left + (i / (n - 1)) * pw
+  const yClk = v  => PAD.top  + ph - (v / maxClk) * ph
+  const yImp = v  => PAD.top  + ph - (v / maxImp) * ph
+
+  const polyline = (pts, clr, dash='') =>
+    `<polyline points="${pts}" fill="none" stroke="${clr}" stroke-width="2"
+       stroke-dasharray="${dash}" stroke-linecap="round" stroke-linejoin="round"/>`
+
+  const ptsClk = sparkline.map((r,i) => `${xPos(i)},${yClk(r.clicks)}`).join(' ')
+  const ptsImp = sparkline.map((r,i) => `${xPos(i)},${yImp(r.impressions)}`).join(' ')
+
+  // Fill area under clicks line
+  const fillPath = `M${xPos(0)},${PAD.top + ph} ` +
+    sparkline.map((r,i) => `L${xPos(i)},${yClk(r.clicks)}`).join(' ') +
+    ` L${xPos(n-1)},${PAD.top+ph} Z`
+
+  // X-axis labels: show ~6 evenly spaced dates
+  const step  = Math.max(1, Math.floor(n / 6))
+  const xLabels = sparkline.map((r, i) => {
+    if (i % step !== 0 && i !== n - 1) return ''
+    const label = r.date.slice(5)  // MM-DD
+    return `<text x="${xPos(i)}" y="${H - 6}" text-anchor="middle"
+      font-size="9" fill="#9ca3af">${label}</text>`
+  }).join('')
+
+  // Y-axis labels (clicks, left)
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => {
+    const val = Math.round(maxClk * t)
+    const y   = yClk(val)
+    return `<text x="${PAD.left - 4}" y="${y + 3}" text-anchor="end"
+      font-size="9" fill="#9ca3af">${val >= 1000 ? (val/1000).toFixed(1)+'k' : val}</text>
+      <line x1="${PAD.left}" y1="${y}" x2="${PAD.left + pw}" y2="${y}"
+        stroke="#f3f4f6" stroke-width="1"/>`
+  }).join('')
+
+  // Y-axis labels (impressions, right)
+  const yTicksR = [0, 0.5, 1].map(t => {
+    const val = Math.round(maxImp * t)
+    const y   = yImp(val)
+    return `<text x="${PAD.left + pw + 4}" y="${y + 3}" text-anchor="start"
+      font-size="9" fill="#d1d5db">${val >= 1000 ? (val/1000).toFixed(1)+'k' : val}</text>`
+  }).join('')
+
+  // Hover dots (invisible, become visible on hover via CSS)
+  const hoverDots = sparkline.map((r, i) => {
+    const tip = `${r.date}: ${r.clicks} clicks / ${r.impressions} impr`
+    return `<circle cx="${xPos(i)}" cy="${yClk(r.clicks)}" r="4"
+      fill="#6366f1" stroke="white" stroke-width="1.5"
+      class="chart-dot" opacity="${days <= 14 ? 1 : 0}">
+      <title>${tip}</title></circle>`
+  }).join('')
+
+  // Legend
+  const legend = `
+    <rect x="${PAD.left}" y="4" width="12" height="3" rx="1" fill="#6366f1"/>
+    <text x="${PAD.left + 16}" y="10" font-size="10" fill="#6b7280">Clicks</text>
+    <line x1="${PAD.left + 66}" y1="5.5" x2="${PAD.left + 78}" y2="5.5"
+      stroke="#d1d5db" stroke-width="2" stroke-dasharray="3,2"/>
+    <text x="${PAD.left + 82}" y="10" font-size="10" fill="#6b7280">Impressions</text>`
+
+  container.innerHTML = `<style>.chart-dot{cursor:pointer;transition:opacity .1s}
+    .chart-dot:hover{opacity:1!important;r:5}</style>
+    <svg width="100%" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg"
+         style="overflow:visible;display:block">
+      ${yTicks}
+      ${yTicksR}
+      <path d="${fillPath}" fill="rgba(99,102,241,0.07)"/>
+      ${polyline(ptsImp, '#d1d5db', '5,3')}
+      ${polyline(ptsClk, '#6366f1')}
+      ${hoverDots}
+      ${xLabels}
+      ${legend}
+    </svg>`
+}
 
 async function loadDashGsc(days) {
-  if (days) S.gscDays = days
-  const d = S.gscDays || 28
+  if (days !== undefined) S.gscDays = days
+  const d    = S.gscDays || 28
   const shop = S.currentShop || ''
   const sp   = shop ? `&shop_domain=${encodeURIComponent(shop)}` : ''
 
-  // Day range toggle buttons
+  // Day-range toggle buttons
   const dayEl = document.getElementById('dash-gsc-days')
-  if (dayEl) dayEl.innerHTML = [7,28,90].map(n =>
+  if (dayEl) dayEl.innerHTML = [7, 28, 90].map(n =>
     `<button onclick="loadDashGsc(${n})"
-      class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${d===n?'bg-indigo-600 text-white':'bg-gray-100 text-gray-600 hover:bg-gray-200'}">${n}d</button>`
+      class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
+             ${d===n ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}">${n}d</button>`
   ).join('')
 
   const body = document.getElementById('dash-gsc-body')
   if (!body) return
 
-  // Check GSC status first
+  // Check GSC connected
+  let gscOk = false
   try {
-    const status = await GET(`/api/v1/audit/gsc/status${shop?'?shop_domain='+encodeURIComponent(shop):''}`)
-    if (!status.configured) {
-      document.getElementById('dash-gsc-subtitle').textContent = 'Not connected'
-      body.innerHTML = `
-        <div class="bg-amber-50 border border-amber-200 rounded-xl p-5 flex items-center justify-between">
-          <div>
-            <div class="font-medium text-amber-800 mb-1">Google Search Console not connected</div>
-            <div class="text-xs text-amber-600">Connect GSC to see daily traffic, rankings and opportunities here.</div>
-          </div>
-          <button class="btn btn-primary btn-sm" onclick="nav('brand')">🔗 Connect GSC</button>
-        </div>`
-      document.getElementById('dash-quick-wins').innerHTML =
-        `<div class="text-xs text-gray-400 py-6 text-center">Connect GSC to see keyword opportunities.</div>`
-      return
-    }
-  } catch(e) {
-    body.innerHTML = `<div class="text-xs text-red-400 py-4">Could not reach GSC: ${esc(e.message)}</div>`
+    const status = await GET(`/api/v1/audit/gsc/status${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
+    gscOk = status.configured
+  } catch(e) {}
+
+  if (!gscOk) {
+    const sub = document.getElementById('dash-gsc-subtitle')
+    if (sub) sub.textContent = 'Not connected'
+    body.innerHTML = `
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-5 flex items-center justify-between">
+        <div>
+          <div class="font-medium text-amber-800 mb-1">Google Search Console not connected</div>
+          <div class="text-xs text-amber-600">Connect GSC to see daily SEO traffic and keyword opportunities.</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="nav('brand')">🔗 Connect GSC</button>
+      </div>`
+    const qwEl = document.getElementById('dash-quick-wins')
+    if (qwEl) qwEl.innerHTML = `<div class="text-xs text-gray-400 py-6 text-center">Connect GSC to see keyword opportunities.</div>`
     return
   }
 
@@ -424,90 +511,22 @@ async function loadDashGsc(days) {
       GET(`/api/v1/audit/gsc/opportunities?days=${d}${sp}`),
     ])
 
-    // Update subtitle with overview stats
+    // Subtitle: summary numbers
     const sub = document.getElementById('dash-gsc-subtitle')
     if (sub) sub.innerHTML =
-      `<span class="text-green-600 font-medium">${(overview.clicks||0).toLocaleString()} clicks</span>
+      `<span class="text-green-600 font-semibold">${(overview.clicks||0).toLocaleString()} clicks</span>
        &nbsp;·&nbsp; ${(overview.impressions||0).toLocaleString()} impressions
-       &nbsp;·&nbsp; CTR ${overview.ctr||0}%
+       &nbsp;·&nbsp; CTR <strong>${overview.ctr||0}%</strong>
        &nbsp;·&nbsp; Avg pos <strong>${overview.position||'—'}</strong>
        &nbsp;·&nbsp; last ${d} days`
 
-    // Draw chart
-    body.innerHTML = `<div style="position:relative;height:220px"><canvas id="dash-chart-canvas"></canvas></div>`
-
-    if (_dashChart) { _dashChart.destroy(); _dashChart = null }
-
-    const labels  = sparkline.map(r => r.date.slice(5))       // MM-DD
-    const clicks  = sparkline.map(r => r.clicks)
-    const impr    = sparkline.map(r => r.impressions)
-    const maxImpr = Math.max(...impr, 1)
-    const maxClk  = Math.max(...clicks, 1)
-
-    _dashChart = new Chart(document.getElementById('dash-chart-canvas'), {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [
-          {
-            label: 'Clicks',
-            data: clicks,
-            borderColor: 'rgb(99,102,241)',
-            backgroundColor: 'rgba(99,102,241,0.08)',
-            fill: true,
-            tension: 0.35,
-            pointRadius: d <= 14 ? 3 : 0,
-            pointHoverRadius: 4,
-            borderWidth: 2,
-            yAxisID: 'yClicks',
-          },
-          {
-            label: 'Impressions',
-            data: impr,
-            borderColor: 'rgb(209,213,219)',
-            backgroundColor: 'transparent',
-            fill: false,
-            tension: 0.35,
-            pointRadius: 0,
-            pointHoverRadius: 3,
-            borderWidth: 1.5,
-            borderDash: [4,3],
-            yAxisID: 'yImpr',
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
-          tooltip: {
-            callbacks: {
-              title: items => sparkline[items[0].dataIndex]?.date || items[0].label,
-            },
-          },
-        },
-        scales: {
-          x: {
-            ticks: { maxTicksLimit: d <= 14 ? 14 : d <= 30 ? 10 : 12, font: { size: 10 }, maxRotation: 0 },
-            grid: { display: false },
-          },
-          yClicks: {
-            type: 'linear', position: 'left',
-            ticks: { font: { size: 10 } },
-            grid: { color: 'rgba(0,0,0,0.04)' },
-            title: { display: true, text: 'Clicks', font: { size: 10 } },
-          },
-          yImpr: {
-            type: 'linear', position: 'right',
-            grid: { display: false },
-            ticks: { font: { size: 10 }, callback: v => v >= 1000 ? (v/1000).toFixed(1)+'k' : v },
-            title: { display: true, text: 'Impressions', font: { size: 10 } },
-          },
-        },
-      },
-    })
+    // Draw SVG chart
+    if (!sparkline.length) {
+      body.innerHTML = `<div class="text-xs text-gray-400 py-8 text-center">No GSC data for this period.</div>`
+    } else {
+      body.innerHTML = `<div id="dash-svg-chart" style="width:100%;min-height:220px"></div>`
+      drawSvgChart(document.getElementById('dash-svg-chart'), sparkline, d)
+    }
 
     // Quick wins table
     const qwEl = document.getElementById('dash-quick-wins')
@@ -522,9 +541,9 @@ async function loadDashGsc(days) {
               <th class="pb-2 font-medium text-right">Impr</th>
             </tr></thead>
             <tbody>${wins.map(w => `
-              <tr class="border-b border-gray-50 hover:bg-gray-50 table-row"
+              <tr class="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
                   onclick="S.auditTab='gsc';nav('audit')" title="${esc(w.page||'')}">
-                <td class="py-1.5 pr-2 max-w-[160px]"><div class="truncate font-medium text-gray-700">${esc(w.query)}</div></td>
+                <td class="py-1.5 pr-2"><div class="truncate max-w-[160px] font-medium text-gray-700">${esc(w.query)}</div></td>
                 <td class="py-1.5 text-right ${w.position<=10?'text-green-600 font-bold':'text-yellow-600'}">#${w.position.toFixed(1)}</td>
                 <td class="py-1.5 text-right text-gray-500">${w.impressions.toLocaleString()}</td>
               </tr>`).join('')}
@@ -532,7 +551,7 @@ async function loadDashGsc(days) {
           </table>`
     }
   } catch(e) {
-    body.innerHTML = `<div class="text-xs text-red-400 py-4">Error: ${esc(e.message)}</div>`
+    body.innerHTML = `<div class="text-xs text-red-500 py-4 text-center">Error: ${esc(e.message)}</div>`
   }
 }
 
