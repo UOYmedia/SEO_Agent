@@ -344,12 +344,14 @@ Respond in this exact format:
         platform: Platform,
         channel_id: Optional[int] = None,
         cluster_id: Optional[int] = None,
+        shop_domain: Optional[str] = None,
     ) -> BlogPost:
         """Save generated article as draft in DB."""
         post = BlogPost(
             platform=platform,
             platform_id=None,
             channel_id=channel_id,
+            shop_domain=shop_domain or None,
             title=title,
             slug=slug,
             content_html=result["content_html"],

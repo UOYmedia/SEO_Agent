@@ -332,9 +332,17 @@ async function renderPosts() {
   document.getElementById('header-actions').innerHTML =
     `<button class="btn btn-primary btn-sm" onclick="nav('generate')">✍️ New Article</button>`
 
+  const shopBadge = S.currentShop
+    ? `<div class="text-xs text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 flex items-center gap-1.5">
+         🏪 <span class="font-medium">${esc(S.currentShop)}</span>
+         <a class="text-gray-400 hover:text-gray-600 cursor-pointer ml-1" onclick="selectShop('');loadPosts()" title="Show all stores">✕</a>
+       </div>`
+    : `<div class="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">⚠️ All stores — select a store to filter</div>`
+
   document.getElementById('content').innerHTML = `
     <div class="card mb-4">
-      <div class="flex gap-3">
+      ${shopBadge}
+      <div class="flex gap-3 mt-3">
         <input type="text" id="ps-search" placeholder="Search title or keyword…" value="${esc(S.postsSearch)}"
           style="flex:1" onkeyup="if(event.key==='Enter'){S.postsSearch=this.value;S.postsPage=1;loadPosts()}">
         <select id="ps-source" style="width:150px" onchange="S.postsSource=this.value;S.postsPage=1;loadPosts()">
@@ -363,6 +371,7 @@ async function loadPosts() {
     page: S.postsPage, limit: 20,
     ...(S.postsSource && { source: S.postsSource }),
     ...(S.postsSearch && { keyword: S.postsSearch }),
+    ...(S.currentShop  && { shop_domain: S.currentShop }),
   })
   try {
     let posts = await GET(`/api/v1/blogs/?${q}`)

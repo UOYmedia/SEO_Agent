@@ -54,13 +54,23 @@ def list_posts(
     platform: Optional[Platform] = None,
     source: Optional[str] = Query(None, description="'synced' | 'generated'"),
     keyword: Optional[str] = None,
+    shop_domain: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
     """List all synced/generated blog posts."""
+    from sqlalchemy import or_
     q = db.query(BlogPost)
 
+    if shop_domain:
+        # Match by explicit shop_domain column (new posts) OR platform_url prefix (legacy synced posts)
+        q = q.filter(
+            or_(
+                BlogPost.shop_domain == shop_domain,
+                BlogPost.platform_url.like(f"%{shop_domain}%"),
+            )
+        )
     if platform:
         q = q.filter(BlogPost.platform == platform)
     if source:

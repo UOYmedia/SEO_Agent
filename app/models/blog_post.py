@@ -59,6 +59,7 @@ class BlogPost(Base):
     seo_title = Column(Text)
     seo_description = Column(Text)
     focus_keyword = Column(String(500))
+    shop_domain = Column(String(255), index=True)   # store this post belongs to
     image_prompt = Column(Text)          # DALL-E prompt stored at generation time
     extra_images = Column(JSON, default=list)  # [{label, prompt, url}]
 

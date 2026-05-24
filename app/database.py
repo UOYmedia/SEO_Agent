@@ -47,6 +47,7 @@ def _migrate_columns():
         add_cols("blog_posts", [
             ("image_prompt",   "TEXT"),
             ("extra_images",   "TEXT"),
+            ("shop_domain",    "VARCHAR(255)"),
         ])
 
         add_cols("brand_profiles", [
