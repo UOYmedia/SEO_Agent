@@ -151,6 +151,7 @@ class ShopifyCrawler:
                 if channel.handle and handle else None
             ),
             "channel_id": channel.id,
+            "shop_domain": self.shop_domain,
             "title": article.get("title", ""),
             "slug": handle,
             "content_html": article.get("body"),

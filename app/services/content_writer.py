@@ -424,6 +424,7 @@ Respond in this exact format:
             platform_id=None,
             shop_domain=shop_domain,
             channel_id=channel_id,
+            shop_domain=shop_domain or None,
             title=title,
             slug=slug,
             content_html=result["content_html"],
