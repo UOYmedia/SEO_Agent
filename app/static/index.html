@@ -333,20 +333,17 @@ async function renderDashboard() {
   // Load post stats + recent posts
   try {
     const sp = S.currentShop ? `&shop_domain=${encodeURIComponent(S.currentShop)}` : ''
-    const [postsResp, clusters] = await Promise.all([
+    const [posts, clusters] = await Promise.all([
       GET(`/api/v1/blogs/?limit=10&page=1${sp}`),
       GET('/api/v1/topics/?limit=100'),
     ])
-    const posts = postsResp.items || []
-    const totalPosts = postsResp.total ?? posts.length
     const published = posts.filter(p => p.status === 'published').length
     const drafts    = posts.filter(p => p.status === 'draft').length
 
     document.getElementById('stat-cards').innerHTML = [
-      { icon: '📝', label: 'Total Posts',     value: totalPosts,       color: 'indigo' },
-      { icon: '✅', label: 'Published',        value: published,        color: 'green'  },
-      { icon: '📋', label: 'Drafts',           value: drafts,           color: 'yellow' },
-      { icon: '🗂', label: 'Topic Clusters',   value: clusters.length,  color: 'purple' },
+      { icon: '✅', label: 'Published',      value: published,       onclick: "nav('posts')" },
+      { icon: '📋', label: 'Drafts',         value: drafts,          onclick: "nav('posts')" },
+      { icon: '🗂',  label: 'Topic Clusters', value: clusters.length, onclick: "nav('topics')" },
     ].map(s => `
       <div class="card flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow" onclick="${s.onclick}">
         <div class="text-3xl">${s.icon}</div>
