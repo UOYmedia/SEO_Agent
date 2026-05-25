@@ -46,8 +46,14 @@ class RankingChecker:
         results = await asyncio.gather(*[self.check_keyword(kw) for kw in keywords])
 
         # Enrich with search volume if DataForSEO is configured
-        from app.services.volume_service import get_search_volumes
-        volumes = await get_search_volumes(keywords)
+        from app.services.volume_service import get_search_volumes, is_configured
+        volumes = {}
+        if is_configured():
+            try:
+                volumes = await get_search_volumes(keywords)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("Volume fetch failed: %s", exc)
         for r in results:
             vol_data = volumes.get(r["keyword"], {})
             r["volume"] = vol_data.get("volume")

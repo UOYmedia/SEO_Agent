@@ -2117,8 +2117,12 @@ function renderAuditRankingsTab() {
   const savedShop = S.shopDomain || ''
   return `
     <div class="card">
-      <h2 class="font-semibold text-gray-800 mb-1">Keyword Rankings</h2>
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="font-semibold text-gray-800">Keyword Rankings</h2>
+        <button class="btn btn-secondary btn-sm" onclick="testDataForSeo()">🔌 Test DataForSEO</button>
+      </div>
       <p class="text-sm text-gray-500 mb-4">Check where your store ranks on Google for specific keywords</p>
+      <div id="dataforseo-status"></div>
       <div class="grid grid-cols-3 gap-4 mb-4">
         <div class="col-span-2">
           <label>Keywords (one per line)</label>
@@ -2133,6 +2137,34 @@ function renderAuditRankingsTab() {
       </div>
       <div id="ranking-results"></div>
     </div>`
+}
+
+async function testDataForSeo() {
+  const el = document.getElementById('dataforseo-status')
+  if (el) el.innerHTML = '<div class="text-xs text-gray-400 mb-3">Testing DataForSEO connection…</div>'
+  try {
+    const r = await GET('/api/v1/audit/volume/test?keyword=seo')
+    if (!el) return
+    if (r.ok) {
+      const sample = r.sample_result
+      el.innerHTML = `
+        <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-3 text-xs space-y-1">
+          <div class="font-semibold text-green-700">✅ DataForSEO connected</div>
+          <div class="text-green-600">API status: ${r.api_status_message} · Cost: $${r.cost ?? '?'}</div>
+          ${sample ? `<div class="text-gray-600">Sample — keyword: <strong>${esc(sample.keyword)}</strong> | volume: <strong>${sample.search_volume?.toLocaleString() ?? '—'}</strong> | competition_index: <strong>${sample.competition_index ?? '—'}</strong> | CPC: <strong>$${sample.cpc ?? '—'}</strong></div>` : ''}
+        </div>`
+    } else {
+      el.innerHTML = `
+        <div class="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-xs space-y-1">
+          <div class="font-semibold text-red-700">✗ DataForSEO connection failed</div>
+          <div class="text-red-600">${esc(r.error || r.api_status_message || 'Unknown error')}</div>
+          <div class="text-gray-500 mt-1">Check DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD env vars in Railway.</div>
+        </div>`
+    }
+  } catch(e) {
+    const el2 = document.getElementById('dataforseo-status')
+    if (el2) el2.innerHTML = `<div class="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-xs text-red-700">Error: ${esc(e.message)}</div>`
+  }
 }
 
 async function runRankingCheck() {
