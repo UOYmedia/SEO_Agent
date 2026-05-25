@@ -73,7 +73,90 @@ def get_topic_cluster(cluster_id: int, db: Session = Depends(get_db)):
     cluster = db.query(TopicCluster).filter(TopicCluster.id == cluster_id).first()
     if not cluster:
         raise HTTPException(status_code=404, detail="Topic cluster not found")
-    return cluster
+    result = {
+        "id": cluster.id,
+        "seed_keyword": cluster.seed_keyword,
+        "cluster_name": cluster.cluster_name,
+        "status": cluster.status,
+        "created_at": cluster.created_at,
+        "questions": cluster.questions or [],
+    }
+    if cluster.plan_json:
+        result.update(cluster.plan_json)
+        result["id"] = cluster.id  # ensure id not overwritten
+    else:
+        import json as _json
+        try:
+            result["pillar"] = _json.loads(cluster.description or "{}")
+        except Exception:
+            result["pillar"] = {}
+        result["supporting_articles"] = []
+    return result
+
+
+from pydantic import BaseModel as _PydBase
+
+
+class _AddKeywordBody(_PydBase):
+    keyword: str
+    country: str = "vn"
+    language: str = "vi"
+
+
+@topics_router.get("/{cluster_id}/keywords")
+def list_cluster_keywords(cluster_id: int, db: Session = Depends(get_db)):
+    from app.models.keyword import Keyword
+    if not db.query(TopicCluster).filter(TopicCluster.id == cluster_id).first():
+        raise HTTPException(404, "Cluster not found")
+    kws = db.query(Keyword).filter(Keyword.topic_cluster_id == cluster_id).all()
+    return [
+        {
+            "id": k.id,
+            "keyword": k.keyword,
+            "current_rank": k.current_rank,
+            "prev_rank": k.prev_rank,
+            "volume": k.volume,
+            "difficulty": k.difficulty,
+            "country": k.country,
+            "language": k.language,
+            "status": k.status,
+            "last_checked": k.last_checked,
+        }
+        for k in kws
+    ]
+
+
+@topics_router.post("/{cluster_id}/keywords")
+def add_cluster_keyword(cluster_id: int, body: _AddKeywordBody, db: Session = Depends(get_db)):
+    from app.models.keyword import Keyword, KeywordStatus
+    if not db.query(TopicCluster).filter(TopicCluster.id == cluster_id).first():
+        raise HTTPException(404, "Cluster not found")
+    kw_text = body.keyword.strip()
+    existing = db.query(Keyword).filter_by(topic_cluster_id=cluster_id, keyword=kw_text).first()
+    if existing:
+        return {"id": existing.id, "keyword": existing.keyword, "already_exists": True}
+    kw = Keyword(
+        keyword=kw_text,
+        topic_cluster_id=cluster_id,
+        country=body.country,
+        language=body.language,
+        status=KeywordStatus.TRACKED,
+    )
+    db.add(kw)
+    db.commit()
+    db.refresh(kw)
+    return {"id": kw.id, "keyword": kw.keyword, "country": kw.country, "language": kw.language}
+
+
+@topics_router.delete("/{cluster_id}/keywords/{kw_id}")
+def remove_cluster_keyword(cluster_id: int, kw_id: int, db: Session = Depends(get_db)):
+    from app.models.keyword import Keyword
+    kw = db.query(Keyword).filter_by(id=kw_id, topic_cluster_id=cluster_id).first()
+    if not kw:
+        raise HTTPException(404, "Keyword not found")
+    db.delete(kw)
+    db.commit()
+    return {"deleted": kw_id}
 
 
 # ── Content Generation ────────────────────────────────────────────────────────

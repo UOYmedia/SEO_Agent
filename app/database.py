@@ -45,9 +45,11 @@ def _migrate_columns():
         inspector = inspect(engine)
 
         add_cols("blog_posts", [
-            ("image_prompt",   "TEXT"),
-            ("extra_images",   "TEXT"),
-            ("shop_domain",    "VARCHAR(255)"),
+            ("image_prompt",        "TEXT"),
+            ("extra_images",        "TEXT"),
+            ("shop_domain",         "VARCHAR(255)"),
+            ("scheduled_at",        "DATETIME"),
+            ("scheduled_blog_id",   "VARCHAR(100)"),
         ])
 
         add_cols("brand_profiles", [
@@ -69,6 +71,14 @@ def _migrate_columns():
 
         add_cols("blog_channels", [
             ("shop_domain", "VARCHAR(255)"),
+        ])
+
+        add_cols("topic_clusters", [
+            ("plan_json", "TEXT"),
+        ])
+
+        add_cols("keywords", [
+            ("topic_cluster_id", "INTEGER"),
         ])
 
         _backfill_shop_domain(conn)

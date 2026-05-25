@@ -648,19 +648,22 @@ async function loadPosts() {
           <tr class="border-b border-gray-50 table-row">
             <td class="py-3 pr-3">
               <div class="font-medium text-gray-800 truncate max-w-xs">${esc(p.title)}</div>
-              ${p.platform_url
-                ? `<a href="${esc(p.platform_url)}" target="_blank" class="text-xs text-indigo-500 hover:underline">View on store ↗</a>`
-                : `<span class="text-xs text-gray-300">Not published</span>`}
+              ${p.scheduled_at
+                ? `<span class="text-xs text-amber-600">🕐 Scheduled: ${fmtDate(p.scheduled_at)}</span>`
+                : p.platform_url
+                  ? `<a href="${esc(p.platform_url)}" target="_blank" class="text-xs text-indigo-500 hover:underline">View on store ↗</a>`
+                  : `<span class="text-xs text-gray-300">Not published</span>`}
             </td>
             <td class="py-3 pr-3 text-gray-500 truncate max-w-[144px]">${esc(p.focus_keyword||'—')}</td>
             <td class="py-3 pr-3">${statusBadge(p.status)}</td>
             <td class="py-3 pr-3">${sourceBadge(p.source)}</td>
             <td class="py-3">
-              <div class="action-btns flex gap-1">
+              <div class="action-btns flex gap-1 flex-wrap">
                 <button class="btn btn-secondary btn-sm" onclick="viewPost(${p.id})">View</button>
-                ${p.status==='draft'
-                  ? `<button class="btn btn-success btn-sm" onclick="openPublishModal(${p.id},'${esc(p.title)}')">Publish</button>`
-                  : ''}
+                ${p.status==='draft' ? `
+                  <button class="btn btn-success btn-sm" onclick="openPublishModal(${p.id},'${esc(p.title)}')">Publish</button>
+                  <button class="btn btn-secondary btn-sm" onclick="openScheduleModal(${p.id},'${esc(p.title)}',${JSON.stringify(p.shop_domain||'')},${JSON.stringify(p.scheduled_at||null)})">🕐 Schedule</button>
+                ` : ''}
               </div>
             </td>
           </tr>`).join('')}
@@ -1100,6 +1103,88 @@ async function doPublish(postId) {
   }
 }
 
+function fmtDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return isNaN(d) ? iso : d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return isNaN(d) ? iso : d.toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+}
+
+function openScheduleModal(postId, title, shopDomain, scheduledAt) {
+  const chOpts = S.channels.map(c =>
+    `<option value="${esc(c.platform_id)}">${esc(c.title)}</option>`).join('')
+  const savedBlogId = localStorage.getItem(`seo_pref_blogid_${S.currentShop}`) || ''
+
+  // Default to tomorrow at 09:00 local time
+  const now = new Date()
+  now.setDate(now.getDate() + 1)
+  now.setHours(9, 0, 0, 0)
+  const defaultDt = now.toISOString().slice(0, 16)
+  const currentDt = scheduledAt ? new Date(scheduledAt).toISOString().slice(0, 16) : defaultDt
+
+  openModal(`Schedule: ${title}`, `
+    <div class="space-y-4">
+      <div>
+        <label>Publish at (UTC)</label>
+        <input type="datetime-local" id="sched-dt" value="${currentDt}">
+        <div class="text-xs text-gray-400 mt-1">Server time is UTC. Add your timezone offset accordingly.</div>
+      </div>
+      <div>
+        <label>Blog channel</label>
+        <select id="sched-blog-id">
+          <option value="${savedBlogId}">${savedBlogId ? 'Last used: '+savedBlogId : '— Select blog —'}</option>
+          ${chOpts}
+        </select>
+      </div>
+      ${scheduledAt ? `
+        <div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Currently scheduled: ${fmtDateTime(scheduledAt)}
+          <button class="ml-2 text-red-500 underline" onclick="cancelSchedule(${postId})">Cancel schedule</button>
+        </div>` : ''}
+    </div>`,
+    `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
+     <button class="btn btn-primary btn-sm" id="do-sched-btn" onclick="doSchedule(${postId})">🕐 Save Schedule</button>`)
+}
+
+async function doSchedule(postId) {
+  const dt = document.getElementById('sched-dt').value
+  const blogId = parseInt(document.getElementById('sched-blog-id').value)
+  if (!dt) { toast('Pick a date/time', 'error'); return }
+  if (!blogId) { toast('Select a blog channel', 'error'); return }
+
+  const btn = document.getElementById('do-sched-btn')
+  btn.disabled = true; btn.innerHTML = `<span class="spinner"></span>`
+
+  try {
+    await POST(`/api/v1/publish/${postId}/schedule`, {
+      scheduled_at: new Date(dt).toISOString(),
+      shop_domain: S.currentShop || '',
+      blog_id: blogId,
+    })
+    localStorage.setItem(`seo_pref_blogid_${S.currentShop}`, blogId)
+    closeModal()
+    toast(`✅ Scheduled for ${fmtDateTime(dt+'Z')}`, 'success')
+    if (S.page === 'posts') loadPosts()
+  } catch(e) {
+    toast('Schedule failed: ' + e.message, 'error')
+    btn.disabled = false; btn.innerHTML = '🕐 Save Schedule'
+  }
+}
+
+async function cancelSchedule(postId) {
+  try {
+    await DEL(`/api/v1/publish/${postId}/schedule`)
+    closeModal()
+    toast('Schedule cancelled — post is back to draft.', 'success')
+    if (S.page === 'posts') loadPosts()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
 // ═══════════════════ KEYWORD RESEARCH ════════════════════════
 function renderResearch() {
   document.getElementById('header-actions').innerHTML = ''
@@ -1301,17 +1386,108 @@ async function loadClusterList() {
     el.innerHTML = list.length === 0
       ? '<div class="text-sm text-gray-400 py-4">No clusters yet.</div>'
       : list.map(c => `
-          <div class="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
-            <div>
+          <div class="flex items-center justify-between py-3 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50 rounded-lg px-2 -mx-2 transition" onclick="openCluster(${c.id})">
+            <div class="min-w-0">
               <div class="text-sm font-medium text-gray-800">${esc(c.cluster_name||c.seed_keyword)}</div>
-              <div class="text-xs text-gray-400">${esc(c.seed_keyword)} · #${c.id}</div>
+              <div class="text-xs text-gray-400">${esc(c.seed_keyword)} · #${c.id} · ${fmtDate(c.created_at)}</div>
             </div>
-            <span class="badge badge-gray text-xs">${esc(c.status)}</span>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="badge badge-gray text-xs">${esc(c.status)}</span>
+              <span class="text-xs text-indigo-500">Open →</span>
+            </div>
           </div>`).join('')
   } catch(e) {
     const el = document.getElementById('tp-list')
     if (el) el.innerHTML = `<div class="text-sm text-red-400">Failed: ${esc(e.message)}</div>`
   }
+}
+
+async function openCluster(id) {
+  const resultEl = document.getElementById('tp-result')
+  if (resultEl) resultEl.innerHTML = `<div class="card mb-4 text-center text-gray-400 py-6"><div class="spinner mx-auto mb-2"></div>Loading cluster…</div>`
+  try {
+    const c = await GET(`/api/v1/topics/${id}`)
+    S.topicPlan = c
+    renderTopicPlanResult(c)
+    loadClusterKeywords(id)
+    window.scrollTo({top: 0, behavior: 'smooth'})
+  } catch(e) {
+    if (resultEl) resultEl.innerHTML = `<div class="card mb-4 text-red-400 text-sm">Failed to load cluster: ${esc(e.message)}</div>`
+  }
+}
+
+async function loadClusterKeywords(clusterId) {
+  try {
+    const kws = await GET(`/api/v1/topics/${clusterId}/keywords`)
+    renderClusterKeywords(clusterId, kws)
+  } catch(e) {
+    // keyword panel optional
+  }
+}
+
+function renderClusterKeywords(clusterId, kws) {
+  const resultEl = document.getElementById('tp-result')
+  if (!resultEl) return
+  const existing = document.getElementById('tp-kw-panel')
+  if (existing) existing.remove()
+
+  const rankBadge = (cur, prev) => {
+    if (cur == null) return '<span class="text-gray-300">—</span>'
+    const delta = prev != null ? prev - cur : 0
+    const arrow = delta > 0 ? `<span class="text-green-500 text-xs">↑${delta}</span>` : delta < 0 ? `<span class="text-red-400 text-xs">↓${Math.abs(delta)}</span>` : ''
+    return `<strong>#${cur}</strong> ${arrow}`
+  }
+
+  const panel = document.createElement('div')
+  panel.id = 'tp-kw-panel'
+  panel.className = 'card mt-4'
+  panel.innerHTML = `
+    <div class="flex items-center justify-between mb-3">
+      <div class="text-sm font-semibold text-gray-700">🔍 Tracked Keywords (${kws.length})</div>
+    </div>
+    ${kws.length === 0
+      ? '<div class="text-xs text-gray-400 mb-3">No keywords tracked yet.</div>'
+      : `<table class="w-full text-sm mb-3">
+          <thead><tr class="text-left text-gray-400 text-xs border-b">
+            <th class="pb-2">Keyword</th>
+            <th class="pb-2 w-20">Rank</th>
+            <th class="pb-2 w-20">Volume</th>
+            <th class="pb-2 w-16"></th>
+          </tr></thead>
+          <tbody>${kws.map(k => `
+            <tr class="border-b border-gray-50">
+              <td class="py-2 text-gray-800">${esc(k.keyword)}</td>
+              <td class="py-2">${rankBadge(k.current_rank, k.prev_rank)}</td>
+              <td class="py-2 text-gray-400">${k.volume != null ? k.volume.toLocaleString() : '—'}</td>
+              <td class="py-2 text-right">
+                <button class="text-red-400 hover:text-red-600 text-xs" onclick="removeClusterKeyword(${clusterId},${k.id})">✕</button>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`}
+    <div class="flex gap-2 mt-1">
+      <input type="text" id="tp-kw-input" placeholder="Add keyword to track…" style="flex:1" onkeyup="if(event.key==='Enter')addClusterKeyword(${clusterId})">
+      <button class="btn btn-secondary btn-sm" onclick="addClusterKeyword(${clusterId})">+ Track</button>
+    </div>`
+  resultEl.appendChild(panel)
+}
+
+async function addClusterKeyword(clusterId) {
+  const inp = document.getElementById('tp-kw-input')
+  const kw = inp?.value.trim()
+  if (!kw) return
+  try {
+    await POST(`/api/v1/topics/${clusterId}/keywords`, { keyword: kw, country: 'vn', language: 'vi' })
+    inp.value = ''
+    loadClusterKeywords(clusterId)
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function removeClusterKeyword(clusterId, kwId) {
+  try {
+    await DEL(`/api/v1/topics/${clusterId}/keywords/${kwId}`)
+    loadClusterKeywords(clusterId)
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
 }
 
 function prefillGenerate(key) {

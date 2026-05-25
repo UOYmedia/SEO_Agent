@@ -117,6 +117,7 @@ Generate 5-7 supporting articles targeting the PAA questions and related searche
                 description=json.dumps(cluster_data.get("pillar", {})),
                 questions=research["people_also_ask"],
                 status=TopicClusterStatus.PLANNED,
+                plan_json=cluster_data,
             )
             db.add(cluster)
             db.commit()
