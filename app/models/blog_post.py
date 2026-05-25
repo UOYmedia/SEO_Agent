@@ -75,4 +75,8 @@ class BlogPost(Base):
     synced_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Scheduling
+    scheduled_at = Column(DateTime, nullable=True)
+    scheduled_blog_id = Column(String(100), nullable=True)
+
     channel = relationship("BlogChannel", back_populates="posts")

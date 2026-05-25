@@ -39,7 +39,13 @@ async def lifespan(app: FastAPI):
         _bootstrap_superadmin()
     except Exception as e:
         logger.error(f"Superadmin bootstrap failed: {e}", exc_info=True)
+    from app.services import scheduler as _sched
+    try:
+        _sched.start()
+    except Exception as e:
+        logger.error(f"Scheduler start failed: {e}", exc_info=True)
     yield
+    _sched.stop()
 
 
 def _bootstrap_superadmin():
