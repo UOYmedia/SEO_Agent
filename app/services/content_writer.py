@@ -217,17 +217,19 @@ Writing rules:
 INTERNAL LINKS — every navigational or CTA phrase MUST link internally:
 ✓ Correct: <a href="/blogs/news/slug">learn more about X</a>
 ✓ Correct: <a href="/products/slug">discover our Y</a>
-✓ Correct: <a href="/blogs/news/slug">read our guide on Z</a>
-✗ FORBIDDEN: linking "learn more / read more / discover / explore / find out / check out / see more / click here" to any external domain
-→ Use the internal links provided below for these phrases
+✗ FORBIDDEN: linking "learn more / read more / discover / explore /
+  find out / check out / see more / click here" to any external domain
+→ Use the internal links provided for these phrases
 
-EXTERNAL LINKS — extremely restricted, maximum 1–2 per article:
-✓ ALLOWED: Wikipedia, government (.gov), academic (.edu), or official scientific/industry body
-✓ ALLOWED: A published clinical study or peer-reviewed research paper (cite the journal, not a retail site)
-✗ FORBIDDEN: any commercial website, retailer, nursery, competitor, brand, blog, or news site — even as a "source"
-✗ FORBIDDEN: "According to [CompetitorSite.com]" or "as highlighted by [AnyBrand]" — these leak traffic and damage brand authority
-✗ FORBIDDEN: any site that sells products similar to ours
-→ If you want to cite a fact from a commercial site, state the fact as general knowledge WITHOUT a link
+EXTERNAL LINKS — only 2 permitted uses:
+✓ Define or explain a technical term, concept, or industry keyword
+  (Wikipedia, official body, authoritative definition — NOT a retail or commercial site)
+✓ Cite a specific statistic, clinical study, or data source inline
+  (peer-reviewed journal, government/academic source ONLY — NOT a brand, blog, or retailer)
+✗ NEVER external links on navigational phrases
+✗ NEVER external links as calls-to-action
+✗ NEVER link to any commercial website, competitor, retailer, or brand as a "source"
+→ If a fact comes from a commercial site: state it as general knowledge WITHOUT a link
 → External links must use: target="_blank" rel="noopener noreferrer"
 ━━━ END LINK STRATEGY ━━━
 
