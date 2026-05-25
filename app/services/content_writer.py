@@ -183,13 +183,20 @@ class ContentWriter:
         if products:
             product_ctx = "\n\nSTORE PRODUCTS — use these for accurate internal links and recommendations:\n"
             for p in products:
-                price_str = f" ({p.currency} {p.price_min:.0f})" if p.price_min else ""
-                desc = (p.description_text or "")[:120].strip()
-                product_ctx += f'- [{p.title}{price_str}]({p.platform_url})'
-                if p.product_type:
-                    product_ctx += f' | Type: {p.product_type}'
-                if p.tags:
-                    product_ctx += f' | Tags: {", ".join(p.tags[:5])}'
+                price_min = p.get("price_min") if isinstance(p, dict) else getattr(p, "price_min", None)
+                currency  = p.get("currency",  "") if isinstance(p, dict) else getattr(p, "currency",  "")
+                title     = p.get("title",     "") if isinstance(p, dict) else getattr(p, "title",     "")
+                url       = p.get("platform_url","") if isinstance(p, dict) else getattr(p, "platform_url","")
+                ptype     = p.get("product_type","") if isinstance(p, dict) else getattr(p, "product_type","")
+                tags      = p.get("tags",      []) if isinstance(p, dict) else getattr(p, "tags",      [])
+                desc      = (p.get("description_text","") if isinstance(p, dict) else getattr(p, "description_text","") or "")[:120].strip()
+
+                price_str = f" ({currency} {price_min:.0f})" if price_min else ""
+                product_ctx += f'- [{title}{price_str}]({url})'
+                if ptype:
+                    product_ctx += f' | Type: {ptype}'
+                if tags:
+                    product_ctx += f' | Tags: {", ".join(tags[:5])}'
                 if desc:
                     product_ctx += f'\n  {desc}'
                 product_ctx += "\n"
