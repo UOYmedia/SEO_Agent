@@ -116,10 +116,18 @@ class ContentWriter:
                 internal_ctx += f'- <a href="{url}">{p.title}</a>\n'
 
         external_ctx = ""
+        _ALLOWED_DOMAINS = ("wikipedia.org", "who.int", "nih.gov", "cdc.gov", "usda.gov",
+                            ".gov", ".edu", "pubmed.ncbi", "doi.org", "ncbi.nlm.nih.gov")
         if external_refs:
-            external_ctx = "\n\nAvailable external authority references (definitions/citations only — see link rules above):\n"
-            for r in external_refs[:3]:
-                external_ctx += f'- <a href="{r["url"]}" target="_blank" rel="noopener noreferrer">{r["title"]}</a>: {r.get("snippet", "")}\n'
+            authority_refs = [
+                r for r in external_refs
+                if any(d in r.get("url", "") for d in _ALLOWED_DOMAINS)
+            ]
+            if authority_refs:
+                external_ctx = "\n\nAuthoritative references ONLY — Wikipedia / .gov / .edu / peer-reviewed only:\n"
+                for r in authority_refs[:2]:
+                    external_ctx += f'- <a href="{r["url"]}" target="_blank" rel="noopener noreferrer">{r["title"]}</a>: {r.get("snippet", "")}\n'
+                external_ctx += "(Do NOT link any commercial, retail, or brand sites — use them for research only, not as hyperlinks)\n"
 
         bp = brand_profile or {}
         tone_instruction = bp.get("tone_of_voice") or tone
@@ -213,11 +221,13 @@ INTERNAL LINKS — every navigational or CTA phrase MUST link internally:
 ✗ FORBIDDEN: linking "learn more / read more / discover / explore / find out / check out / see more / click here" to any external domain
 → Use the internal links provided below for these phrases
 
-EXTERNAL LINKS — only 2 permitted uses:
-✓ Define or explain a technical term, concept, or industry keyword (Wikipedia, official body, authoritative definition)
-✓ Cite a specific statistic, clinical study, or data source inline (e.g. "according to [Source]")
-✗ NEVER external links on navigational phrases (learn more, discover, explore, read more, etc.)
-✗ NEVER external links as calls-to-action that take readers away from the site
+EXTERNAL LINKS — extremely restricted, maximum 1–2 per article:
+✓ ALLOWED: Wikipedia, government (.gov), academic (.edu), or official scientific/industry body
+✓ ALLOWED: A published clinical study or peer-reviewed research paper (cite the journal, not a retail site)
+✗ FORBIDDEN: any commercial website, retailer, nursery, competitor, brand, blog, or news site — even as a "source"
+✗ FORBIDDEN: "According to [CompetitorSite.com]" or "as highlighted by [AnyBrand]" — these leak traffic and damage brand authority
+✗ FORBIDDEN: any site that sells products similar to ours
+→ If you want to cite a fact from a commercial site, state the fact as general knowledge WITHOUT a link
 → External links must use: target="_blank" rel="noopener noreferrer"
 ━━━ END LINK STRATEGY ━━━
 
