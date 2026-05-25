@@ -109,16 +109,16 @@ class ContentWriter:
 
         internal_ctx = ""
         if internal_posts:
-            internal_ctx = "\n\nInsert 2-3 of these internal links naturally in the body:\n"
+            internal_ctx = "\n\nAvailable internal links — use 2–3 of these for navigational phrases:\n"
             for p in internal_posts:
                 url = p.platform_url or f"/blogs/news/{p.slug}"
                 internal_ctx += f'- <a href="{url}">{p.title}</a>\n'
 
         external_ctx = ""
         if external_refs:
-            external_ctx = "\n\nInsert 2-3 of these external authority links naturally:\n"
+            external_ctx = "\n\nAvailable external authority references (definitions/citations only — see link rules above):\n"
             for r in external_refs[:3]:
-                external_ctx += f'- <a href="{r["url"]}" target="_blank" rel="noopener">{r["title"]}</a>: {r.get("snippet", "")}\n'
+                external_ctx += f'- <a href="{r["url"]}" target="_blank" rel="noopener noreferrer">{r["title"]}</a>: {r.get("snippet", "")}\n'
 
         bp = brand_profile or {}
         tone_instruction = bp.get("tone_of_voice") or tone
@@ -192,7 +192,23 @@ Writing rules:
 - Structure: intro paragraph → <h2> sections → FAQ (from PAA) → conclusion paragraph
 - Use proper HTML tags: <h2>, <h3>, <p>, <ul>, <li>, <strong>
 - Never use <html>, <head>, <body> tags
-- End with a <section class="faq"> containing PAA questions as <h3> + <p> answers{lessons_ctx}{notes_ctx}{kb_context}{product_ctx}"""
+- End with a <section class="faq"> containing PAA questions as <h3> + <p> answers
+
+━━━ LINK STRATEGY — MANDATORY ━━━
+INTERNAL LINKS — every navigational or CTA phrase MUST link internally:
+✓ Correct: <a href="/blogs/news/slug">learn more about X</a>
+✓ Correct: <a href="/products/slug">discover our Y</a>
+✓ Correct: <a href="/blogs/news/slug">read our guide on Z</a>
+✗ FORBIDDEN: linking "learn more / read more / discover / explore / find out / check out / see more / click here" to any external domain
+→ Use the internal links provided below for these phrases
+
+EXTERNAL LINKS — only 2 permitted uses:
+✓ Define or explain a technical term, concept, or industry keyword (Wikipedia, official body, authoritative definition)
+✓ Cite a specific statistic, clinical study, or data source inline (e.g. "according to [Source]")
+✗ NEVER external links on navigational phrases (learn more, discover, explore, read more, etc.)
+✗ NEVER external links as calls-to-action that take readers away from the site
+→ External links must use: target="_blank" rel="noopener noreferrer"
+━━━ END LINK STRATEGY ━━━{lessons_ctx}{notes_ctx}{kb_context}{product_ctx}"""
 
         user = f"""Write a complete SEO article (do NOT include an H1 — the title is handled by the platform):
 
@@ -421,9 +437,22 @@ Your job is to rewrite the given article based on the user's instructions.
 Rules:
 - Apply ALL the rewrite instructions precisely
 - Keep the focus keyword and SEO structure intact
-- Preserve internal/external links already in the article unless explicitly told to remove them
 - Use proper HTML: <h2>, <h3>, <p>, <ul>, <li>, <strong> — never <html>/<head>/<body>
-- Keep a <section class="faq"> if the original has one (update it if relevant)"""
+- Keep a <section class="faq"> if the original has one (update it if relevant)
+
+━━━ LINK STRATEGY — MANDATORY ━━━
+INTERNAL LINKS — every navigational or CTA phrase MUST link internally:
+✓ Correct: <a href="/blogs/news/slug">learn more about X</a>
+✓ Correct: <a href="/products/slug">discover our Y</a>
+✗ FORBIDDEN: "learn more / read more / discover / explore / find out / check out / see more" linked to any external domain
+→ If the original article has external links on these phrases, replace them with the nearest matching internal URL or remove the link entirely
+
+EXTERNAL LINKS — only 2 permitted uses:
+✓ Define or explain a technical term, concept, or industry keyword
+✓ Cite a specific statistic, study, or authoritative data source inline
+✗ All other external links on navigational/CTA phrases must be removed or converted to internal links
+→ Keep rel="noopener noreferrer" on all retained external links
+━━━ END LINK STRATEGY ━━━"""
 
         user = f"""Rewrite this article based on the instructions below.
 
