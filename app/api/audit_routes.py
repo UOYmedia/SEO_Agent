@@ -14,6 +14,23 @@ from app.config import settings
 audit_router = APIRouter(prefix="/api/v1/audit", tags=["audit"])
 
 
+@audit_router.get("/pre-publish/{post_id}")
+def pre_publish_audit(
+    post_id: int,
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Run independent SEO audit on a draft before publishing. Blocks/warns on issues."""
+    post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+    if post.shop_domain:
+        check_store_scope(user, post.shop_domain, "audit", db)
+    result = SeoAuditor().audit_post(post)
+    result["ready_to_publish"] = result["score"] >= 70 and not result["cta_external_leaks"]
+    return result
+
+
 @audit_router.get("/posts")
 def audit_all_posts(
     shop_domain: Optional[str] = Query(None, description="Filter by shop domain"),

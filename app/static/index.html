@@ -1040,19 +1040,67 @@ async function doRegenerateImage(postId) {
 
 // ─────────────────── Publish modal ────────────────────────────
 async function openPublishModal(postId, title) {
+  // Step 1: show audit loading screen immediately
+  openModal(`Publish: ${esc(title)}`,
+    `<div class="flex flex-col items-center justify-center py-10 gap-3">
+       <div class="spinner-dark"></div>
+       <div class="text-sm text-gray-500">Running pre-publish audit…</div>
+     </div>`,
+    `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>`)
+
+  // Fetch audit + post info in parallel
+  let audit = null, hasImage = false
+  try {
+    const [a, p] = await Promise.all([
+      GET(`/api/v1/audit/pre-publish/${postId}`),
+      GET(`/api/v1/generate/article/${postId}/content`).catch(() => ({})),
+    ])
+    audit = a
+    hasImage = !!p.featured_image_url
+  } catch(e) {
+    audit = null
+  }
+
+  // Step 2: render audit results + publish form together
   const chOpts = S.channels.map(c =>
     `<option value="${esc(c.platform_id)}">${esc(c.title)} (ID: ${c.platform_id})</option>`).join('')
   const savedBlogId = localStorage.getItem(`seo_pref_blogid_${S.currentShop}`) || ''
 
-  // Check if the draft already has a featured image
-  let hasImage = false
-  try {
-    const p = await GET(`/api/v1/generate/article/${postId}/content`)
-    hasImage = !!p.featured_image_url
-  } catch {}
+  const gradeColor = g => ({A:'text-green-600 bg-green-50 border-green-200', B:'text-blue-600 bg-blue-50 border-blue-200', C:'text-yellow-600 bg-yellow-50 border-yellow-200', D:'text-orange-600 bg-orange-50 border-orange-200', F:'text-red-600 bg-red-50 border-red-200'})[g] || 'text-gray-600 bg-gray-50 border-gray-200'
 
-  openModal(`Publish: ${title}`, `
+  const auditBlock = audit ? `
+    <div class="border rounded-xl p-4 space-y-2 ${audit.ready_to_publish ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}">
+      <div class="flex items-center justify-between">
+        <div class="text-sm font-semibold ${audit.ready_to_publish ? 'text-green-700' : 'text-amber-700'}">
+          ${audit.ready_to_publish ? '✅ Article passed audit' : '⚠️ Audit issues found'}
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-bold border rounded-lg px-2 py-0.5 ${gradeColor(audit.grade)}">${audit.grade} · ${audit.score}/${audit.max_score}</span>
+          <span class="text-xs text-gray-400">${audit.word_count?.toLocaleString()} words</span>
+        </div>
+      </div>
+      ${audit.issues?.length ? `
+        <div class="space-y-1">
+          ${audit.issues.map(i => `<div class="text-xs text-red-700 flex gap-1.5"><span>✗</span><span>${esc(i)}</span></div>`).join('')}
+        </div>` : ''}
+      ${audit.warnings?.length ? `
+        <div class="space-y-1">
+          ${audit.warnings.map(w => `<div class="text-xs text-amber-700 flex gap-1.5"><span>⚠</span><span>${esc(w)}</span></div>`).join('')}
+        </div>` : ''}
+      ${audit.semantic_keywords?.length ? `
+        <div class="text-xs text-gray-500 pt-1 border-t border-current border-opacity-20">
+          <span class="font-medium">Semantic keywords:</span> ${audit.semantic_keywords.map(k => `<span class="inline-block bg-white border rounded px-1 mr-1 mb-1">${esc(k)}</span>`).join('')}
+        </div>` : ''}
+      <div class="flex gap-4 text-xs text-gray-500 pt-1">
+        <span>🔗 Internal: <strong>${audit.internal_link_count ?? '—'}</strong></span>
+        <span>🌐 External: <strong>${audit.external_link_count ?? '—'}</strong></span>
+        <span>H2: <strong>${audit.h2_count ?? '—'}</strong></span>
+      </div>
+    </div>` : `<div class="text-xs text-gray-400 bg-gray-50 rounded-lg p-3">Audit unavailable — check audit scope permissions.</div>`
+
+  document.getElementById('modal-body').innerHTML = `
     <div class="space-y-4">
+      ${auditBlock}
       <div>
         <label>Shopify Blog ID <span class="text-red-500">*</span></label>
         <input type="number" id="pub-blog-id" placeholder="e.g. 12345678" value="${savedBlogId}">
@@ -1065,17 +1113,17 @@ async function openPublishModal(postId, title) {
         <input type="text" id="pub-author" value="${esc(S.user?.name || 'SEO Agent')}">
       </div>
       <div class="flex items-center gap-2 text-xs ${hasImage ? 'text-green-700 bg-green-50 border-green-200' : 'text-amber-700 bg-amber-50 border-amber-200'} border rounded-lg px-3 py-2">
-        ${hasImage
-          ? '🖼 Featured image is set — will be uploaded to Shopify.'
-          : '⚠️ No featured image set. The article will publish without one. Add an image in the draft view first.'}
+        ${hasImage ? '🖼 Featured image is set — will be uploaded to Shopify.' : '⚠️ No featured image. Add one in draft view before publishing.'}
       </div>
       <div class="flex items-center gap-3 py-1">
         <input type="checkbox" id="pub-live" checked class="w-4 h-4 rounded accent-indigo-600">
         <label for="pub-live" class="!mb-0 cursor-pointer">Publish immediately (uncheck = save as Shopify draft)</label>
       </div>
-    </div>`,
+    </div>`
+
+  document.getElementById('modal-footer').innerHTML =
     `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
-     <button class="btn btn-primary btn-sm" id="do-pub-btn" onclick="doPublish(${postId})">🚀 Publish</button>`)
+     <button class="btn btn-primary btn-sm" id="do-pub-btn" onclick="doPublish(${postId})">🚀 Publish</button>`
 }
 
 async function doPublish(postId) {

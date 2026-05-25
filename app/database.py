@@ -50,6 +50,7 @@ def _migrate_columns():
             ("shop_domain",         "VARCHAR(255)"),
             ("scheduled_at",        "TIMESTAMP"),
             ("scheduled_blog_id",   "VARCHAR(100)"),
+            ("semantic_keywords",   "TEXT"),
         ])
 
         add_cols("brand_profiles", [

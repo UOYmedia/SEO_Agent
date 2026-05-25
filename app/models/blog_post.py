@@ -68,6 +68,9 @@ class BlogPost(Base):
     # Internal links inserted (list of target post IDs)
     internal_links = Column(JSON, default=list)
 
+    # Semantic/LSI keywords identified by the AI writer
+    semantic_keywords = Column(JSON, default=list)   # list[str]
+
     # State
     status = Column(Enum(PostStatus), default=PostStatus.PUBLISHED)
     source = Column(String(50), default="synced")        # 'synced' | 'generated'

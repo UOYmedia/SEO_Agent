@@ -208,7 +208,22 @@ EXTERNAL LINKS — only 2 permitted uses:
 ✗ NEVER external links on navigational phrases (learn more, discover, explore, read more, etc.)
 ✗ NEVER external links as calls-to-action that take readers away from the site
 → External links must use: target="_blank" rel="noopener noreferrer"
-━━━ END LINK STRATEGY ━━━{lessons_ctx}{notes_ctx}{kb_context}{product_ctx}"""
+━━━ END LINK STRATEGY ━━━
+
+━━━ SEMANTIC KEYWORD SET — build topic authority ━━━
+Identify 8–12 semantically related keywords/LSI phrases that reinforce the topic authority of this article.
+These must:
+1. Appear naturally integrated in the body — NOT forced or stuffed
+2. Cover related subtopics, synonyms, supporting concepts, and long-tail variants
+3. Be linked where it adds genuine value:
+   - Prefer internal links (use the list provided) — anchor the phrase to a related article on the same site
+   - Use an external authority link ONLY for technical terms needing a definition (see link rules above)
+   - Leave unlinked if no relevant destination exists
+4. Include the final list in the meta JSON as "semantic_keywords": ["term1", "term2", ...]
+
+Goal: Google must recognize this article as expert-level content covering the FULL semantic field
+of the topic — not exact-match keyword stuffing but rich, interconnected topic coverage.
+━━━ END SEMANTIC KEYWORD SET ━━━{lessons_ctx}{notes_ctx}{kb_context}{product_ctx}"""
 
         user = f"""Write a complete SEO article (do NOT include an H1 — the title is handled by the platform):
 
@@ -229,7 +244,7 @@ Respond in this exact format:
 [full HTML article content]
 </article>
 <meta>
-{{"seo_title": "60-char SEO title", "meta_description": "155-char description with keyword", "tags": ["tag1","tag2","tag3","tag4","tag5"], "image_prompt": "DALL-E prompt for a professional blog banner"}}
+{{"seo_title": "60-char SEO title", "meta_description": "155-char description with keyword", "tags": ["tag1","tag2","tag3","tag4","tag5"], "image_prompt": "DALL-E prompt for a professional blog banner", "semantic_keywords": ["related term 1", "related term 2", "...up to 12 terms"]}}
 </meta>"""
 
         return system, user
@@ -340,6 +355,7 @@ Respond in this exact format:
             "image_prompt": image_prompt,
             "image_url": image_url,
             "internal_links": internal_links_used,
+            "semantic_keywords": meta.get("semantic_keywords", []),
             "usage": {
                 "input_tokens": message.usage.prompt_tokens,
                 "output_tokens": message.usage.completion_tokens,
@@ -538,6 +554,7 @@ Respond in this exact format:
             image_prompt=result.get("image_prompt"),
             featured_image_url=result.get("image_url"),
             internal_links=result["internal_links"],
+            semantic_keywords=result.get("semantic_keywords", []),
             status=PostStatus.DRAFT,
             source="generated",
             published_at=None,
