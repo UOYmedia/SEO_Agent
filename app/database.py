@@ -101,6 +101,10 @@ def _migrate_columns():
             ("shop_domain", "VARCHAR(255)"),
         ])
 
+        add_cols("products", [
+            ("notes", "TEXT"),
+        ])
+
         add_cols("topic_clusters", [
             ("plan_json", "TEXT"),
         ])
