@@ -3254,71 +3254,66 @@ function viewProduct(id) {
 
 async function renderBrand() {
   const shop = S.currentShop
-  document.getElementById('header-actions').innerHTML =
-    `<button class="btn btn-primary btn-sm" onclick="saveBrand()">💾 Save Profile</button>`
+  document.getElementById('header-actions').innerHTML = ''
 
-  if (!S.brandProfile) {
-    try {
-      S.brandProfile = await GET(`/api/v1/settings/brand${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
-    } catch { S.brandProfile = {} }
-  }
+  S.brandProfile = null  // always reload fresh
+  try {
+    S.brandProfile = await GET(`/api/v1/settings/brand${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
+  } catch { S.brandProfile = {} }
   const bp = S.brandProfile || {}
+  const canEdit = bp.can_edit !== false  // default true for admin (can_edit absent = admin)
+  const isAdmin = S.user?.role === 'admin'
+
+  document.getElementById('header-actions').innerHTML =
+    canEdit ? `<button class="btn btn-primary btn-sm" onclick="saveBrand()">💾 Save Profile</button>` : ''
 
   document.getElementById('content').innerHTML = `
     <div class="space-y-5 max-w-2xl">
+      ${!canEdit ? `<div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-xs text-amber-700">👁 View only — contact an admin to request edit access (<code>brand_edit</code> scope).</div>` : ''}
       <div class="card">
         <div class="font-semibold text-gray-800 mb-1">🎨 Brand Profile</div>
-        <p class="text-sm text-gray-500 mb-4">Defines how GPT-4o writes every article. Applied automatically when generating content for <strong>${esc(shop || 'all stores')}</strong>.</p>
+        <p class="text-sm text-gray-500 mb-4">Global rules applied to every article for <strong>${esc(shop || 'all stores')}</strong>. Highest priority — overrides all per-article settings.</p>
 
         <div class="space-y-4">
           <div>
             <label>Brand Name</label>
-            <input type="text" id="bp-name" value="${esc(bp.brand_name||'')}" placeholder="e.g. GingerGlow">
+            <input type="text" id="bp-name" value="${esc(bp.brand_name||'')}" placeholder="e.g. GingerGlow" ${!canEdit?'readonly':''}>
           </div>
           <div>
             <label>Brand Description <span class="text-gray-400 font-normal text-xs">— who you are, what you sell, target audience</span></label>
-            <textarea id="bp-desc" rows="3" placeholder="e.g. GingerGlow is a premium Vietnamese skincare brand targeting women 25-40 who value natural ingredients...">${esc(bp.brand_description||'')}</textarea>
+            <textarea id="bp-desc" rows="3" placeholder="e.g. GingerGlow is a premium Vietnamese skincare brand targeting women 25-40…" ${!canEdit?'readonly':''}>${esc(bp.brand_description||'')}</textarea>
           </div>
           <div>
             <label>Brand Style <span class="text-gray-400 font-normal text-xs">— keywords describing the visual/content vibe</span></label>
-            <input type="text" id="bp-style" value="${esc(bp.brand_style||'')}" placeholder="e.g. minimalist, premium, warm, educational, trustworthy">
+            <input type="text" id="bp-style" value="${esc(bp.brand_style||'')}" placeholder="e.g. minimalist, premium, warm, educational, trustworthy" ${!canEdit?'readonly':''}>
           </div>
           <div>
             <label>Tone of Voice <span class="text-gray-400 font-normal text-xs">— how articles should sound</span></label>
-            <textarea id="bp-tone" rows="3" placeholder="e.g. Write like a knowledgeable friend who genuinely cares about skincare. Be warm and reassuring, avoid jargon. Use 'you' to address the reader directly...">${esc(bp.tone_of_voice||'')}</textarea>
+            <textarea id="bp-tone" rows="3" placeholder="e.g. Write like a knowledgeable friend…" ${!canEdit?'readonly':''}>${esc(bp.tone_of_voice||'')}</textarea>
           </div>
           <div>
             <label>Output Requirements <span class="text-gray-400 font-normal text-xs">— formatting, structure, HTML rules</span></label>
-            <textarea id="bp-output" rows="5" placeholder="e.g.
-- Always open with a relatable problem/pain point in the first paragraph
-- Use bullet points for product comparisons
-- Include a 'Pro tip' callout box using &lt;div class=&quot;pro-tip&quot;&gt;
-- End every article with a CTA to shop the collection">${esc(bp.output_requirements||'')}</textarea>
+            <textarea id="bp-output" rows="5" placeholder="e.g. Always open with a pain point…" ${!canEdit?'readonly':''}>${esc(bp.output_requirements||'')}</textarea>
           </div>
           <div class="border border-red-200 rounded-xl p-4 bg-red-50">
             <label class="text-red-700">⚠️ Critical Writing Notes <span class="text-red-400 font-normal text-xs">— enforced above ALL other instructions, non-negotiable</span></label>
-            <textarea id="bp-notes" rows="5" placeholder="Rules the AI must NEVER violate, e.g.:
-- NEVER mention competitor brands by name
-- Do NOT make medical or health claims — use 'may help' or 'some users report'
-- Always cite sources when quoting statistics
-- Every article MUST include a paragraph about our return policy
-- Avoid phrases like 'the best' or '#1' without evidence"
-              class="border-red-300 focus:ring-red-400">${esc(bp.writing_notes||'')}</textarea>
-            <div class="text-xs text-red-600 mt-1">These rules are placed at the top of the AI system prompt and override everything else.</div>
+            <textarea id="bp-notes" rows="5" placeholder="Rules the AI must NEVER violate…"
+              class="border-red-300 focus:ring-red-400" ${!canEdit?'readonly':''}>${esc(bp.writing_notes||'')}</textarea>
+            <div class="text-xs text-red-600 mt-1">Placed at the very top of the AI system prompt — overrides everything else.</div>
           </div>
         </div>
       </div>
 
-      <!-- Shared users -->
-      <div class="card" id="brand-users-panel">
-        <div class="font-semibold text-gray-800 mb-1">👥 Shared With Users</div>
-        <p class="text-sm text-gray-500 mb-3">Grant team members access to this brand profile. They will see it listed and the AI will apply it when they generate articles.</p>
-        <div id="brand-shared-list">${skeletons(2)}</div>
-        <div class="flex gap-2 mt-3" id="brand-add-user-row">
-          <select id="brand-user-select" style="flex:1">
-            <option value="">— Add a user —</option>
-          </select>
-          <button class="btn btn-secondary btn-sm" onclick="addBrandUser()">+ Share</button>
+      <!-- Brand editors (admin only) -->
+      <div class="card" id="brand-users-panel" style="display:none">
+        <div class="font-semibold text-gray-800 mb-1">✏️ Brand Edit Permission</div>
+        <p class="text-sm text-gray-500 mb-3">
+          Users with store access can <strong>view</strong> this brand profile.<br>
+          Grant <code class="bg-gray-100 px-1 rounded">brand_edit</code> scope in User Management to also allow <strong>editing</strong> it.
+        </p>
+        <div id="brand-editors-list">${skeletons(2)}</div>
+        <div class="text-xs text-gray-400 mt-3 bg-gray-50 rounded-lg p-3">
+          To grant edit: <strong>User Management</strong> → select user → Permissions → tick <em>brand_edit</em> → Grant Access
         </div>
       </div>
 
@@ -3338,9 +3333,11 @@ async function renderBrand() {
           <div class="flex items-center gap-3 flex-wrap">
             ${bp.gsc_connected
               ? `<span class="badge badge-green">✅ Connected</span>
-                 <button class="btn btn-secondary btn-sm" onclick="gscDisconnect()">Disconnect</button>`
-              : `<button class="btn btn-primary btn-sm" onclick="gscConnect()">🔗 Connect via Google OAuth</button>
-                 <span class="text-xs text-gray-400">Opens Google sign-in in a new tab</span>`}
+                 ${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="gscDisconnect()">Disconnect</button>` : ''}`
+              : isAdmin
+                ? `<button class="btn btn-primary btn-sm" onclick="gscConnect()">🔗 Connect via Google OAuth</button>
+                   <span class="text-xs text-gray-400">Opens Google sign-in in a new tab</span>`
+                : `<span class="text-xs text-gray-400">GSC connection managed by admin.</span>`}
           </div>
           <div class="text-xs text-amber-700 bg-amber-50 rounded-lg p-3 space-y-1">
             <div class="font-medium">⚠️ Why service account email fails ("email not found")</div>
@@ -3370,12 +3367,10 @@ async function renderBrand() {
       </div>
     </div>`
 
-  if (S.user?.role === 'admin') {
-    loadBrandSharedUsers()
-    loadUsersForBrandShare()
-  } else {
+  if (isAdmin) {
     const panel = document.getElementById('brand-users-panel')
-    if (panel) panel.style.display = 'none'
+    if (panel) panel.style.display = ''
+    loadBrandEditors()
   }
 }
 
@@ -3397,56 +3392,23 @@ async function saveBrand() {
   } catch(e) { toast('Save failed: ' + e.message, 'error') }
 }
 
-async function loadBrandSharedUsers() {
+async function loadBrandEditors() {
   const shop = S.currentShop
-  const el = document.getElementById('brand-shared-list')
+  const el = document.getElementById('brand-editors-list')
   if (!el) return
   try {
-    const users = await GET(`/api/v1/settings/brand/users${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
-    el.innerHTML = users.length === 0
-      ? '<div class="text-xs text-gray-400">No users shared yet.</div>'
-      : users.map(u => `
-          <div class="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-            <div>
-              <div class="text-sm font-medium text-gray-800">${esc(u.name||u.email)}</div>
-              <div class="text-xs text-gray-400">${esc(u.email)} · ${esc(u.role)}</div>
-            </div>
-            <button class="text-red-400 hover:text-red-600 text-xs" onclick="removeBrandUser(${u.id})">Revoke</button>
+    const editors = await GET(`/api/v1/settings/brand/editors${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
+    el.innerHTML = editors.length === 0
+      ? '<div class="text-xs text-gray-400">No users have brand_edit permission yet.</div>'
+      : editors.map(u => `
+          <div class="flex items-center py-2 border-b border-gray-50 last:border-0 gap-3">
+            <div class="text-sm font-medium text-gray-800">${esc(u.name||u.email)}</div>
+            <div class="text-xs text-gray-400">${esc(u.email)}</div>
+            <span class="badge badge-indigo text-xs ml-auto">brand_edit</span>
           </div>`).join('')
   } catch(e) {
     if (el) el.innerHTML = `<div class="text-xs text-red-400">${esc(e.message)}</div>`
   }
-}
-
-async function loadUsersForBrandShare() {
-  try {
-    const users = await GET('/api/v1/users/')
-    const sel = document.getElementById('brand-user-select')
-    if (!sel) return
-    sel.innerHTML = `<option value="">— Add a user —</option>` +
-      users.map(u => `<option value="${u.id}">${esc(u.name||u.email)} (${esc(u.email)})</option>`).join('')
-  } catch {}
-}
-
-async function addBrandUser() {
-  const shop = S.currentShop
-  const sel = document.getElementById('brand-user-select')
-  const userId = parseInt(sel?.value)
-  if (!userId) { toast('Select a user first', 'error'); return }
-  try {
-    await POST(`/api/v1/settings/brand/users/${userId}${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
-    toast('User added!', 'success')
-    loadBrandSharedUsers()
-    if (sel) sel.value = ''
-  } catch(e) { toast('Failed: ' + e.message, 'error') }
-}
-
-async function removeBrandUser(userId) {
-  const shop = S.currentShop
-  try {
-    await DEL(`/api/v1/settings/brand/users/${userId}${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
-    loadBrandSharedUsers()
-  } catch(e) { toast('Failed: ' + e.message, 'error') }
 }
 
 async function gscConnect() {
@@ -3602,7 +3564,7 @@ async function doCreateUser() {
 
 function openPermModal(userId, userName, currentPerms) {
   const stores = S.myStores.map(s => s.shop_domain)
-  const scopeOpts = ['read', 'write', 'publish', 'audit']
+  const scopeOpts = ['read', 'write', 'publish', 'audit', 'brand_edit']
   const existingByShop = {}
   currentPerms.forEach(p => { existingByShop[p.shop_domain] = p.scopes || [] })
 
@@ -3628,6 +3590,7 @@ function openPermModal(userId, userName, currentPerms) {
           <div><strong>audit</strong> — run audits, keyword research</div>
           <div><strong>write</strong> — generate articles</div>
           <div><strong>publish</strong> — publish to Shopify</div>
+          <div><strong>brand_edit</strong> — edit the store's brand profile</div>
         </div>
       </div>
       <div id="current-perms">
