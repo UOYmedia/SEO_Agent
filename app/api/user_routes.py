@@ -191,7 +191,7 @@ def grant_permission(
     if not user:
         raise HTTPException(404, "User not found")
 
-    valid_scopes = {"read", "write", "publish", "audit"}
+    valid_scopes = {"read", "write", "publish", "audit", "brand_edit"}
     bad = [s for s in body.scopes if s not in valid_scopes]
     if bad:
         raise HTTPException(422, f"Invalid scopes: {bad}. Valid: {sorted(valid_scopes)}")

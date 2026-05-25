@@ -63,12 +63,38 @@ def _profile_out(p: BrandProfile) -> dict:
     }
 
 
+def _can_view_brand(user, shop_domain: Optional[str], db: Session) -> bool:
+    """User can view a brand profile if they have any store access (or are admin)."""
+    if user.role == "admin":
+        return True
+    if shop_domain is None:
+        return True  # global profile visible to all
+    from app.models.user import UserStorePermission
+    perm = db.query(UserStorePermission).filter_by(
+        user_id=user.id, shop_domain=shop_domain
+    ).first()
+    return perm is not None
+
+
+def _can_edit_brand(user, shop_domain: Optional[str], db: Session) -> bool:
+    """User can edit a brand profile if they are admin or have brand_edit scope."""
+    if user.role == "admin":
+        return True
+    if shop_domain is None:
+        return False  # only admin can edit the global profile
+    from app.models.user import UserStorePermission
+    perm = db.query(UserStorePermission).filter_by(
+        user_id=user.id, shop_domain=shop_domain
+    ).first()
+    return perm is not None and "brand_edit" in (perm.scopes or [])
+
+
 @settings_router.get("/brands")
 def list_brand_profiles(
     user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Admins see all brands. Non-admins see brands shared with them or matching their stores."""
+    """Admins see all brands. Non-admins see brands for their accessible stores."""
     if user.role == "admin":
         profiles = db.query(BrandProfile).order_by(BrandProfile.brand_name).all()
     else:
@@ -77,9 +103,7 @@ def list_brand_profiles(
         all_profiles = db.query(BrandProfile).all()
         profiles = [
             p for p in all_profiles
-            if p.shop_domain is None                           # global
-            or (p.shop_domain and p.shop_domain in user_shops) # user's store
-            or (user.id in (p.shared_user_ids or []))          # explicitly shared
+            if p.shop_domain is None or (p.shop_domain and p.shop_domain in user_shops)
         ]
         profiles.sort(key=lambda p: p.brand_name or "")
     return [_profile_out(p) for p in profiles]
@@ -91,18 +115,21 @@ def get_brand_profile(
     user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if not _can_view_brand(user, shop_domain, db):
+        raise HTTPException(403, "No access to this store's brand profile")
     profile = db.query(BrandProfile).filter_by(shop_domain=shop_domain).first()
     if not profile:
         return {
             "shop_domain": shop_domain,
-            "brand_name": "",
-            "brand_style": "",
-            "brand_description": "",
-            "tone_of_voice": "",
-            "output_requirements": "",
+            "brand_name": "", "brand_style": "", "brand_description": "",
+            "tone_of_voice": "", "output_requirements": "", "writing_notes": "",
+            "gsc_site_url": "", "gsc_connected": False, "shared_user_ids": [],
+            "can_edit": _can_edit_brand(user, shop_domain, db),
             "updated_at": None,
         }
-    return _profile_out(profile)
+    out = _profile_out(profile)
+    out["can_edit"] = _can_edit_brand(user, shop_domain, db)
+    return out
 
 
 @settings_router.put("/brand")
@@ -111,6 +138,8 @@ def save_brand_profile(
     user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if not _can_edit_brand(user, body.shop_domain, db):
+        raise HTTPException(403, "You don't have brand_edit permission for this store")
     profile = db.query(BrandProfile).filter_by(shop_domain=body.shop_domain).first()
     if not profile:
         profile = BrandProfile(shop_domain=body.shop_domain)
@@ -136,68 +165,32 @@ def save_brand_profile(
     return _profile_out(profile)
 
 
-# ── Brand profile user sharing ────────────────────────────────────────────────
+# ── Brand profile — who has edit access (admin view) ─────────────────────────
 
-@settings_router.get("/brand/users")
-def list_brand_shared_users(
+@settings_router.get("/brand/editors")
+def list_brand_editors(
     shop_domain: Optional[str] = Query(None),
     user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Return users who have this brand profile explicitly shared with them."""
+    """Return users who have brand_edit scope on this store (admin only)."""
     if user.role != "admin":
         raise HTTPException(403, "Admin only")
-    profile = db.query(BrandProfile).filter_by(shop_domain=shop_domain).first()
-    if not profile:
-        return []
-    from app.models.user import User
-    shared_ids = profile.shared_user_ids or []
-    users = db.query(User).filter(User.id.in_(shared_ids)).all() if shared_ids else []
-    return [{"id": u.id, "name": u.name or u.email, "email": u.email, "role": u.role} for u in users]
-
-
-@settings_router.post("/brand/users/{user_id}")
-def share_brand_with_user(
-    user_id: int,
-    shop_domain: Optional[str] = Query(None),
-    user=Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Grant a user access to this brand profile."""
-    if user.role != "admin":
-        raise HTTPException(403, "Admin only")
-    profile = db.query(BrandProfile).filter_by(shop_domain=shop_domain).first()
-    if not profile:
-        raise HTTPException(404, "Brand profile not found")
-    from app.models.user import User
-    target = db.query(User).filter(User.id == user_id).first()
-    if not target:
-        raise HTTPException(404, "User not found")
-    ids = list(profile.shared_user_ids or [])
-    if user_id not in ids:
-        ids.append(user_id)
-        profile.shared_user_ids = ids
-        db.commit()
-    return {"shared": True, "user_id": user_id}
-
-
-@settings_router.delete("/brand/users/{user_id}")
-def unshare_brand_from_user(
-    user_id: int,
-    shop_domain: Optional[str] = Query(None),
-    user=Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Revoke a user's access to this brand profile."""
-    if user.role != "admin":
-        raise HTTPException(403, "Admin only")
-    profile = db.query(BrandProfile).filter_by(shop_domain=shop_domain).first()
-    if not profile:
-        raise HTTPException(404, "Brand profile not found")
-    ids = [i for i in (profile.shared_user_ids or []) if i != user_id]
-    profile.shared_user_ids = ids
-    db.commit()
-    return {"unshared": True, "user_id": user_id}
+    from app.models.user import User, UserStorePermission
+    if shop_domain:
+        perms = (
+            db.query(UserStorePermission)
+            .filter(
+                UserStorePermission.shop_domain == shop_domain,
+                UserStorePermission.scopes.contains("brand_edit"),
+            )
+            .all()
+        )
+        user_ids = [p.user_id for p in perms]
+    else:
+        user_ids = []
+    editors = db.query(User).filter(User.id.in_(user_ids)).all() if user_ids else []
+    return [{"id": u.id, "name": u.name or u.email, "email": u.email} for u in editors]
 
 
 # ── Shopify OAuth credentials ─────────────────────────────────────────────────
