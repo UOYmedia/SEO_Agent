@@ -1,5 +1,11 @@
+import re
 from bs4 import BeautifulSoup
 from app.models.blog_post import BlogPost
+
+_CTA_PHRASES = re.compile(
+    r'\b(learn more|read more|discover|explore|find out|check out|see more|click here|view more|get more)\b',
+    re.IGNORECASE,
+)
 
 
 class SeoAuditor:
@@ -13,9 +19,10 @@ class SeoAuditor:
         keyword = post.focus_keyword or ""
 
         issues = []
+        warnings = []   # non-blocking, informational
         score = 0
 
-        # Word count (20 pts)
+        # ── Word count (20 pts) ────────────────────────────────────────────────
         if word_count >= 1500:
             score += 20
         elif word_count >= 800:
@@ -24,7 +31,7 @@ class SeoAuditor:
         else:
             issues.append(f"Content too short ({word_count} words) — aim for 1500+")
 
-        # Title length (15 pts)
+        # ── Title length (15 pts) ──────────────────────────────────────────────
         title_len = len(title)
         if 50 <= title_len <= 60:
             score += 15
@@ -34,7 +41,7 @@ class SeoAuditor:
         else:
             issues.append(f"Title length {title_len} chars — ideal is 50-60")
 
-        # Focus keyword (15 pts)
+        # ── Focus keyword (30 pts) ─────────────────────────────────────────────
         if keyword:
             score += 15
             if keyword.lower() in title.lower():
@@ -46,13 +53,13 @@ class SeoAuditor:
                 if 1 <= density <= 3:
                     score += 5
                 elif density < 1:
-                    issues.append(f"Keyword density {density:.1f}% — too low, use keyword more naturally")
+                    issues.append(f"Keyword density {density:.1f}% — too low, aim for 1-3%")
                 else:
                     issues.append(f"Keyword density {density:.1f}% — too high, may look spammy")
         else:
             issues.append("No focus keyword set")
 
-        # Headings (15 pts)
+        # ── Headings (15 pts) ─────────────────────────────────────────────────
         h2s = soup.find_all("h2")
         h3s = soup.find_all("h3")
         if len(h2s) >= 3:
@@ -63,7 +70,7 @@ class SeoAuditor:
         else:
             issues.append("No H2 headings — structure content with section headings")
 
-        # Images (10 pts)
+        # ── Images (10 pts) ───────────────────────────────────────────────────
         images = soup.find_all("img")
         missing_alt = [img for img in images if not img.get("alt")]
         if images:
@@ -75,11 +82,57 @@ class SeoAuditor:
         else:
             issues.append("No images in content — add relevant images")
 
-        # Featured image (5 pts)
+        # ── Featured image (5 pts) ─────────────────────────────────────────────
         if post.featured_image_url:
             score += 5
         else:
             issues.append("No featured image")
+
+        # ── Link quality (15 pts) ─────────────────────────────────────────────
+        all_links = soup.find_all("a", href=True)
+        internal_links = [a for a in all_links if not a["href"].startswith("http")]
+        external_links = [a for a in all_links if a["href"].startswith("http")]
+
+        # Check for external links on CTA phrases (should be internal)
+        cta_external_leaks = []
+        for a in external_links:
+            anchor_text = a.get_text(strip=True)
+            if _CTA_PHRASES.search(anchor_text):
+                cta_external_leaks.append(anchor_text)
+
+        if not cta_external_leaks:
+            score += 8
+        else:
+            issues.append(
+                f"External links on CTA phrases (should be internal): "
+                + ", ".join(f'"{t}"' for t in cta_external_leaks[:3])
+            )
+
+        if len(internal_links) >= 2:
+            score += 7
+        elif len(internal_links) == 1:
+            score += 3
+            warnings.append("Only 1 internal link — aim for 2-4 internal links per article")
+        else:
+            issues.append("No internal links — add links to related content on the site")
+
+        if external_links and not any(a.get("rel") for a in external_links):
+            warnings.append('External links missing rel="noopener noreferrer"')
+
+        # ── Semantic keywords coverage (5 pts) ────────────────────────────────
+        semantic_kws = post.semantic_keywords or []
+        if semantic_kws:
+            covered = sum(1 for kw in semantic_kws if kw.lower() in text.lower())
+            coverage_pct = covered / len(semantic_kws) * 100
+            if coverage_pct >= 70:
+                score += 5
+            else:
+                warnings.append(
+                    f"Semantic keywords coverage {coverage_pct:.0f}% ({covered}/{len(semantic_kws)}) — "
+                    "consider weaving more related terms into the content"
+                )
+        else:
+            warnings.append("No semantic keyword set — regenerate article to build topic authority keywords")
 
         return {
             "post_id": post.id,
@@ -92,7 +145,13 @@ class SeoAuditor:
             "h3_count": len(h3s),
             "image_count": len(images),
             "images_missing_alt": len(missing_alt),
+            "internal_link_count": len(internal_links),
+            "external_link_count": len(external_links),
+            "cta_external_leaks": cta_external_leaks,
+            "semantic_keywords": semantic_kws,
             "score": score,
+            "max_score": 100,
             "grade": "A" if score >= 85 else "B" if score >= 70 else "C" if score >= 55 else "D" if score >= 40 else "F",
             "issues": issues,
+            "warnings": warnings,
         }

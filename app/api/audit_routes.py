@@ -14,6 +14,23 @@ from app.config import settings
 audit_router = APIRouter(prefix="/api/v1/audit", tags=["audit"])
 
 
+@audit_router.get("/pre-publish/{post_id}")
+def pre_publish_audit(
+    post_id: int,
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Run independent SEO audit on a draft before publishing. Blocks/warns on issues."""
+    post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+    if post.shop_domain:
+        check_store_scope(user, post.shop_domain, "audit", db)
+    result = SeoAuditor().audit_post(post)
+    result["ready_to_publish"] = result["score"] >= 70 and not result["cta_external_leaks"]
+    return result
+
+
 @audit_router.get("/posts")
 def audit_all_posts(
     shop_domain: Optional[str] = Query(None, description="Filter by shop domain"),
@@ -72,6 +89,25 @@ async def check_rankings(body: RankingsRequest, db: Session = Depends(get_db)):
     ranking = sorted([r for r in results if r["position"]], key=lambda x: x["position"])
     not_ranking = [r for r in results if not r["position"]]
     return {"shop": shop, "results": ranking + not_ranking}
+
+
+class VolumeRequest(BaseModel):
+    keywords: List[str]
+    language_code: str = "en"
+    location_code: int = 2840
+
+
+@audit_router.post("/volume")
+async def get_keyword_volumes(body: VolumeRequest, user=Depends(get_current_user)):
+    """Fetch monthly search volume for a list of keywords via DataForSEO."""
+    from app.services.volume_service import get_search_volumes
+    kws = [k.strip() for k in body.keywords if k.strip()]
+    if not kws:
+        raise HTTPException(422, "Provide at least one keyword")
+    data = await get_search_volumes(kws, body.language_code, body.location_code)
+    if not data and kws:
+        return {"configured": False, "message": "Set DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD to enable search volume.", "results": {}}
+    return {"configured": True, "results": data}
 
 
 class PlanRequest(BaseModel):

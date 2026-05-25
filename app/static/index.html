@@ -1040,19 +1040,67 @@ async function doRegenerateImage(postId) {
 
 // ─────────────────── Publish modal ────────────────────────────
 async function openPublishModal(postId, title) {
+  // Step 1: show audit loading screen immediately
+  openModal(`Publish: ${esc(title)}`,
+    `<div class="flex flex-col items-center justify-center py-10 gap-3">
+       <div class="spinner-dark"></div>
+       <div class="text-sm text-gray-500">Running pre-publish audit…</div>
+     </div>`,
+    `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>`)
+
+  // Fetch audit + post info in parallel
+  let audit = null, hasImage = false
+  try {
+    const [a, p] = await Promise.all([
+      GET(`/api/v1/audit/pre-publish/${postId}`),
+      GET(`/api/v1/generate/article/${postId}/content`).catch(() => ({})),
+    ])
+    audit = a
+    hasImage = !!p.featured_image_url
+  } catch(e) {
+    audit = null
+  }
+
+  // Step 2: render audit results + publish form together
   const chOpts = S.channels.map(c =>
     `<option value="${esc(c.platform_id)}">${esc(c.title)} (ID: ${c.platform_id})</option>`).join('')
   const savedBlogId = localStorage.getItem(`seo_pref_blogid_${S.currentShop}`) || ''
 
-  // Check if the draft already has a featured image
-  let hasImage = false
-  try {
-    const p = await GET(`/api/v1/generate/article/${postId}/content`)
-    hasImage = !!p.featured_image_url
-  } catch {}
+  const gradeColor = g => ({A:'text-green-600 bg-green-50 border-green-200', B:'text-blue-600 bg-blue-50 border-blue-200', C:'text-yellow-600 bg-yellow-50 border-yellow-200', D:'text-orange-600 bg-orange-50 border-orange-200', F:'text-red-600 bg-red-50 border-red-200'})[g] || 'text-gray-600 bg-gray-50 border-gray-200'
 
-  openModal(`Publish: ${title}`, `
+  const auditBlock = audit ? `
+    <div class="border rounded-xl p-4 space-y-2 ${audit.ready_to_publish ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}">
+      <div class="flex items-center justify-between">
+        <div class="text-sm font-semibold ${audit.ready_to_publish ? 'text-green-700' : 'text-amber-700'}">
+          ${audit.ready_to_publish ? '✅ Article passed audit' : '⚠️ Audit issues found'}
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-bold border rounded-lg px-2 py-0.5 ${gradeColor(audit.grade)}">${audit.grade} · ${audit.score}/${audit.max_score}</span>
+          <span class="text-xs text-gray-400">${audit.word_count?.toLocaleString()} words</span>
+        </div>
+      </div>
+      ${audit.issues?.length ? `
+        <div class="space-y-1">
+          ${audit.issues.map(i => `<div class="text-xs text-red-700 flex gap-1.5"><span>✗</span><span>${esc(i)}</span></div>`).join('')}
+        </div>` : ''}
+      ${audit.warnings?.length ? `
+        <div class="space-y-1">
+          ${audit.warnings.map(w => `<div class="text-xs text-amber-700 flex gap-1.5"><span>⚠</span><span>${esc(w)}</span></div>`).join('')}
+        </div>` : ''}
+      ${audit.semantic_keywords?.length ? `
+        <div class="text-xs text-gray-500 pt-1 border-t border-current border-opacity-20">
+          <span class="font-medium">Semantic keywords:</span> ${audit.semantic_keywords.map(k => `<span class="inline-block bg-white border rounded px-1 mr-1 mb-1">${esc(k)}</span>`).join('')}
+        </div>` : ''}
+      <div class="flex gap-4 text-xs text-gray-500 pt-1">
+        <span>🔗 Internal: <strong>${audit.internal_link_count ?? '—'}</strong></span>
+        <span>🌐 External: <strong>${audit.external_link_count ?? '—'}</strong></span>
+        <span>H2: <strong>${audit.h2_count ?? '—'}</strong></span>
+      </div>
+    </div>` : `<div class="text-xs text-gray-400 bg-gray-50 rounded-lg p-3">Audit unavailable — check audit scope permissions.</div>`
+
+  document.getElementById('modal-body').innerHTML = `
     <div class="space-y-4">
+      ${auditBlock}
       <div>
         <label>Shopify Blog ID <span class="text-red-500">*</span></label>
         <input type="number" id="pub-blog-id" placeholder="e.g. 12345678" value="${savedBlogId}">
@@ -1065,17 +1113,17 @@ async function openPublishModal(postId, title) {
         <input type="text" id="pub-author" value="${esc(S.user?.name || 'SEO Agent')}">
       </div>
       <div class="flex items-center gap-2 text-xs ${hasImage ? 'text-green-700 bg-green-50 border-green-200' : 'text-amber-700 bg-amber-50 border-amber-200'} border rounded-lg px-3 py-2">
-        ${hasImage
-          ? '🖼 Featured image is set — will be uploaded to Shopify.'
-          : '⚠️ No featured image set. The article will publish without one. Add an image in the draft view first.'}
+        ${hasImage ? '🖼 Featured image is set — will be uploaded to Shopify.' : '⚠️ No featured image. Add one in draft view before publishing.'}
       </div>
       <div class="flex items-center gap-3 py-1">
         <input type="checkbox" id="pub-live" checked class="w-4 h-4 rounded accent-indigo-600">
         <label for="pub-live" class="!mb-0 cursor-pointer">Publish immediately (uncheck = save as Shopify draft)</label>
       </div>
-    </div>`,
+    </div>`
+
+  document.getElementById('modal-footer').innerHTML =
     `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
-     <button class="btn btn-primary btn-sm" id="do-pub-btn" onclick="doPublish(${postId})">🚀 Publish</button>`)
+     <button class="btn btn-primary btn-sm" id="do-pub-btn" onclick="doPublish(${postId})">🚀 Publish</button>`
 }
 
 async function doPublish(postId) {
@@ -1445,6 +1493,7 @@ function renderClusterKeywords(clusterId, kws) {
   panel.innerHTML = `
     <div class="flex items-center justify-between mb-3">
       <div class="text-sm font-semibold text-gray-700">🔍 Tracked Keywords (${kws.length})</div>
+      ${kws.length > 0 ? `<button class="btn btn-secondary btn-sm" onclick="refreshClusterVolume(${clusterId})">📊 Refresh Volume</button>` : ''}
     </div>
     ${kws.length === 0
       ? '<div class="text-xs text-gray-400 mb-3">No keywords tracked yet.</div>'
@@ -1452,14 +1501,16 @@ function renderClusterKeywords(clusterId, kws) {
           <thead><tr class="text-left text-gray-400 text-xs border-b">
             <th class="pb-2">Keyword</th>
             <th class="pb-2 w-20">Rank</th>
-            <th class="pb-2 w-20">Volume</th>
+            <th class="pb-2 w-24">Vol/mo</th>
+            <th class="pb-2 w-16">CPC</th>
             <th class="pb-2 w-16"></th>
           </tr></thead>
           <tbody>${kws.map(k => `
             <tr class="border-b border-gray-50">
               <td class="py-2 text-gray-800">${esc(k.keyword)}</td>
               <td class="py-2">${rankBadge(k.current_rank, k.prev_rank)}</td>
-              <td class="py-2 text-gray-400">${k.volume != null ? k.volume.toLocaleString() : '—'}</td>
+              <td class="py-2 text-gray-600">${k.volume != null ? '<strong>'+k.volume.toLocaleString()+'</strong>' : '<span class="text-gray-300">—</span>'}</td>
+              <td class="py-2 text-gray-400 text-xs">${k.cpc != null ? '$'+k.cpc.toFixed(2) : '<span class="text-gray-300">—</span>'}</td>
               <td class="py-2 text-right">
                 <button class="text-red-400 hover:text-red-600 text-xs" onclick="removeClusterKeyword(${clusterId},${k.id})">✕</button>
               </td>
@@ -1487,6 +1538,29 @@ async function addClusterKeyword(clusterId) {
 async function removeClusterKeyword(clusterId, kwId) {
   try {
     await DEL(`/api/v1/topics/${clusterId}/keywords/${kwId}`)
+    loadClusterKeywords(clusterId)
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function refreshClusterVolume(clusterId) {
+  try {
+    const kws = await GET(`/api/v1/topics/${clusterId}/keywords`)
+    const keywords = kws.map(k => k.keyword)
+    if (!keywords.length) return
+    const res = await POST('/api/v1/audit/volume', { keywords })
+    if (!res.configured) {
+      toast('Set DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD to enable search volume', 'error')
+      return
+    }
+    // Update each keyword via PATCH with new volume data
+    await Promise.all(kws.map(async k => {
+      const v = res.results[k.keyword]
+      if (v) await api('PATCH', `/api/v1/topics/${clusterId}/keywords/${k.id}`, {
+        volume: v.volume, cpc: v.cpc,
+        difficulty: v.competition != null ? Math.round(v.competition * 100) : null,
+      })
+    }))
+    toast('Search volume updated', 'success')
     loadClusterKeywords(clusterId)
   } catch(e) { toast('Failed: ' + e.message, 'error') }
 }
@@ -2100,6 +2174,8 @@ function renderRankingResults(data) {
         <thead><tr class="border-b border-gray-100 text-xs text-gray-500 uppercase">
           <th class="text-left py-2 pr-4">Keyword</th>
           <th class="text-center py-2 px-3">Position</th>
+          <th class="text-right py-2 px-3">Search Vol</th>
+          <th class="text-right py-2 px-3">CPC</th>
           <th class="text-left py-2 px-3">Ranking URL</th>
         </tr></thead>
         <tbody>
@@ -2107,6 +2183,8 @@ function renderRankingResults(data) {
             <tr class="border-b border-gray-50 table-row">
               <td class="py-2.5 pr-4 font-medium text-gray-800">${esc(r.keyword)}</td>
               <td class="text-center py-2.5 px-3">${posBadge(r.position)}</td>
+              <td class="text-right py-2.5 px-3 text-gray-600">${r.volume != null ? r.volume.toLocaleString() : '<span class="text-gray-300">—</span>'}</td>
+              <td class="text-right py-2.5 px-3 text-gray-500 text-xs">${r.cpc != null ? '$'+r.cpc.toFixed(2) : '<span class="text-gray-300">—</span>'}</td>
               <td class="py-2.5 px-3 text-xs text-gray-500 max-w-xs truncate">
                 ${r.ranking_url ? `<a href="${esc(r.ranking_url)}" target="_blank" class="text-indigo-600 hover:underline truncate block">${esc(r.ranking_title||r.ranking_url)}</a>` : '—'}
               </td>
@@ -2114,10 +2192,11 @@ function renderRankingResults(data) {
         </tbody>
       </table>
     </div>
-    <div class="mt-3 flex gap-3 text-xs text-gray-400">
+    <div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-400">
       <span>Ranking: <strong class="text-green-600">${ranking.length}</strong></span>
       <span>Not ranking: <strong class="text-gray-500">${notRanking.length}</strong></span>
       ${ranking.length ? `<span>Best: <strong class="text-blue-600">#${Math.min(...ranking.map(r=>r.position))} for "${ranking.sort((a,b)=>a.position-b.position)[0].keyword}"</strong></span>` : ''}
+      ${results[0]?.volume == null ? '<span class="text-amber-500">Search volume: set DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD to enable</span>' : ''}
     </div>
     ${S.rankingResults ? `<div class="mt-4"><button class="btn btn-primary btn-sm" onclick="S.auditTab='plan';renderAudit()">🎯 Generate Ranking Plan →</button></div>` : ''}`
 }
@@ -2344,9 +2423,45 @@ async function loadGscData() {
       GET(`/api/v1/audit/gsc/queries?days=${S.gscDays}&limit=20${shopParam}`),
       GET(`/api/v1/audit/gsc/opportunities?days=${S.gscDays}${shopParam}`),
     ])
+    S.gscQueries = queries   // store for volume fetch
     renderGscData(overview, pages, queries, opps)
   } catch(e) {
     el.innerHTML = `<div class="text-red-500 text-sm p-4">Error loading GSC data: ${esc(e.message)}</div>`
+  }
+}
+
+async function fetchGscVolume() {
+  const queries = (S.gscQueries || []).map(q => q.query)
+  if (!queries.length) return
+  const btn = document.getElementById('gsc-vol-btn')
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Fetching…' }
+  try {
+    const res = await POST('/api/v1/audit/volume', { keywords: queries })
+    if (!res.configured) {
+      toast('Set DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD to enable search volume', 'error')
+      return
+    }
+    // Show volume header
+    const hdr = document.getElementById('gsc-vol-header')
+    if (hdr) hdr.style.display = ''
+
+    // Update each row: append volume cell
+    const tbody = document.getElementById('gsc-queries-body')
+    if (tbody) {
+      const rows = tbody.querySelectorAll('tr')
+      rows.forEach((row, i) => {
+        const q = queries[i]
+        const v = q && res.results[q]
+        const cell = row.querySelector('td.gsc-vol-cell') || document.createElement('td')
+        cell.className = 'text-right px-2 text-gray-600 gsc-vol-cell'
+        cell.innerHTML = v?.volume != null ? v.volume.toLocaleString() : '<span class="text-gray-300">—</span>'
+        if (!row.querySelector('td.gsc-vol-cell')) row.appendChild(cell)
+      })
+    }
+    if (btn) { btn.disabled = false; btn.innerHTML = '📊 Search Volume ✓' }
+  } catch(e) {
+    toast('Volume fetch failed: ' + e.message, 'error')
+    if (btn) { btn.disabled = false; btn.innerHTML = '📊 Search Volume' }
   }
 }
 
@@ -2443,14 +2558,18 @@ function renderGscData(overview, pages, queries, opps) {
         </div>
 
         <div class="card">
-          <h3 class="font-semibold text-gray-700 mb-3">🔍 Top Queries</h3>
-          <table class="w-full text-sm">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold text-gray-700">🔍 Top Queries</h3>
+            <button class="btn btn-secondary btn-sm" id="gsc-vol-btn" onclick="fetchGscVolume()">📊 Search Volume</button>
+          </div>
+          <table class="w-full text-sm" id="gsc-queries-table">
             <thead><tr class="border-b border-gray-100 text-xs text-gray-400 uppercase">
               <th class="text-left py-1.5">Query</th>
               <th class="text-right py-1.5 px-2">Clicks</th>
               <th class="text-right py-1.5 px-2">Pos</th>
+              <th class="text-right py-1.5 px-2" id="gsc-vol-header" style="display:none">Vol/mo</th>
             </tr></thead>
-            <tbody>
+            <tbody id="gsc-queries-body">
               ${tableRows(queries, [
                 {fn: r => `<span class="text-gray-700 truncate block max-w-48">${esc(r.query)}</span>`},
                 {cls:'text-right text-gray-700 font-medium px-2', fn: r => r.clicks.toLocaleString()},
