@@ -97,17 +97,30 @@ class VolumeRequest(BaseModel):
     location_code: int = 2840
 
 
+@audit_router.get("/volume/test")
+async def test_volume_connection(
+    keyword: str = "seo",
+    user=Depends(get_current_user),
+):
+    """Debug endpoint — tests DataForSEO credentials and shows raw response."""
+    from app.services.volume_service import test_connection
+    return await test_connection(keyword)
+
+
 @audit_router.post("/volume")
 async def get_keyword_volumes(body: VolumeRequest, user=Depends(get_current_user)):
     """Fetch monthly search volume for a list of keywords via DataForSEO."""
-    from app.services.volume_service import get_search_volumes
+    from app.services.volume_service import get_search_volumes, is_configured
+    if not is_configured():
+        return {"configured": False, "message": "Set DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD in environment variables.", "results": {}}
     kws = [k.strip() for k in body.keywords if k.strip()]
     if not kws:
         raise HTTPException(422, "Provide at least one keyword")
-    data = await get_search_volumes(kws, body.language_code, body.location_code)
-    if not data and kws:
-        return {"configured": False, "message": "Set DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD to enable search volume.", "results": {}}
-    return {"configured": True, "results": data}
+    try:
+        data = await get_search_volumes(kws, body.language_code, body.location_code)
+        return {"configured": True, "results": data}
+    except Exception as e:
+        raise HTTPException(502, f"DataForSEO error: {e}")
 
 
 class PlanRequest(BaseModel):
