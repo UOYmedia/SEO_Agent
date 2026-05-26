@@ -42,8 +42,10 @@ async def publish_to_shopify(
     body: PublishToShopifyRequest,
     db: Session = Depends(get_db),
 ):
-    """Publish a draft to Shopify. Uses the post's existing featured_image_url
-    (generated at draft time). Does not call DALL-E."""
+    """Publish or re-publish a post to Shopify.
+    - Draft with no platform_id → creates new Shopify article
+    - Draft/published with platform_id → updates existing Shopify article in-place
+    Uses existing featured_image_url; does not call DALL-E."""
     post = _get_post_or_404(post_id, db)
 
     publisher = ShopifyPublisher(shop_domain=body.shop_domain, db=db)
