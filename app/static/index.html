@@ -1326,6 +1326,7 @@ function renderResearchResults(r) {
     <div class="flex gap-2">
       <button class="btn btn-secondary btn-sm" onclick="useResearchForGenerate()">✍️ Use for Generate →</button>
       <button class="btn btn-secondary btn-sm" onclick="useResearchForTopics()">🗂 Plan Topic Cluster →</button>
+      ${r.keyword ? `<button class="btn btn-secondary btn-sm" onclick="followKeyword('${esc(r.keyword)}','research')">📌 Follow Keyword</button>` : ''}
     </div>
     ${r.note ? `<div class="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 p-3 rounded-lg">⚠️ ${esc(r.note)}</div>` : ''}`
 }
@@ -2017,6 +2018,7 @@ function renderAudit() {
     { id:'plan', label:'🎯 Ranking Plan' },
     { id:'gsc', label:'📊 Search Console' },
     { id:'suggest', label:'✨ Keyword Ideas' },
+    { id:'tracking', label:'📌 Keyword Tracking' },
   ]
   const tabBar = tabs.map(t =>
     `<button onclick="S.auditTab='${t.id}';renderAudit()"
@@ -2028,6 +2030,7 @@ function renderAudit() {
   else if (S.auditTab === 'rankings') body = renderAuditRankingsTab()
   else if (S.auditTab === 'plan') body = renderAuditPlanTab()
   else if (S.auditTab === 'gsc') body = renderGscTab()
+  else if (S.auditTab === 'tracking') body = renderTrackingTab()
   else body = renderSuggestTab()
 
   document.getElementById('content').innerHTML = `
@@ -2041,6 +2044,7 @@ function renderAudit() {
   if (S.auditTab === 'plan' && S.planResult) renderPlanResult(S.planResult)
   if (S.auditTab === 'gsc') initGscTab()
   if (S.auditTab === 'suggest' && S.suggestionResult) renderSuggestions(S.suggestionResult)
+  if (S.auditTab === 'tracking') initTrackingTab()
 }
 
 function renderAuditBlogTab() {
@@ -2687,12 +2691,15 @@ function renderGscData(overview, pages, queries, opps) {
               <th class="text-right py-1.5 px-2">Clicks</th>
               <th class="text-right py-1.5 px-2">Pos</th>
               <th class="text-right py-1.5 px-2" id="gsc-vol-header" style="display:none">Vol/mo</th>
+              <th class="py-1.5 px-2"></th>
             </tr></thead>
             <tbody id="gsc-queries-body">
               ${tableRows(queries, [
                 {fn: r => `<span class="text-gray-700 truncate block max-w-48">${esc(r.query)}</span>`},
                 {cls:'text-right text-gray-700 font-medium px-2', fn: r => r.clicks.toLocaleString()},
                 {cls:'text-right px-2', fn: r => posBadge(r.position)},
+                {cls:'text-right px-2 gsc-vol-cell', fn: r => `<span class="text-gray-300">—</span>`},
+                {cls:'px-2', fn: r => `<button class="btn btn-secondary btn-sm text-xs" onclick="followKeyword('${esc(r.query)}','gsc')" title="Follow this keyword">📌</button>`},
               ])}
             </tbody>
           </table>
@@ -2711,6 +2718,245 @@ function prefillRankingCheck(keyword) {
     const el = document.getElementById('ranking-keywords')
     if (el) el.value = keyword
   }, 100)
+}
+
+// ═══════════════════ KEYWORD TRACKING ════════════════════════
+
+async function followKeyword(keyword, source) {
+  if (!S.currentShop) { toast('Select a store first', 'error'); return }
+  try {
+    await POST('/api/v1/tracking/follow', { keyword, shop_domain: S.currentShop, source: source || 'manual' })
+    toast(`📌 Now following: ${keyword}`, 'success')
+  } catch(e) { toast('Failed to follow: ' + e.message, 'error') }
+}
+
+function renderTrackingTab() {
+  return `
+    <div class="card">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="font-semibold text-gray-800">📌 Keyword Tracking</h2>
+          <p class="text-sm text-gray-500 mt-0.5">Daily ranking, clicks and search volume for followed keywords</p>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary btn-sm" onclick="triggerCollect(this)">↻ Collect Now</button>
+          <button class="btn btn-primary btn-sm" onclick="openAddFollowModal()">+ Follow Keyword</button>
+        </div>
+      </div>
+      <div id="tracking-list"><div class="flex justify-center py-10"><div class="spinner-dark"></div></div></div>
+    </div>`
+}
+
+async function initTrackingTab() {
+  await loadTrackingList()
+}
+
+async function loadTrackingList() {
+  const el = document.getElementById('tracking-list')
+  if (!el) return
+  try {
+    const shopParam = S.currentShop ? `?shop_domain=${encodeURIComponent(S.currentShop)}&active_only=true` : '?active_only=true'
+    const follows = await GET('/api/v1/tracking/follows' + shopParam)
+    renderTrackingList(follows)
+  } catch(e) {
+    if (el) el.innerHTML = `<div class="text-red-500 text-sm p-4">Error: ${esc(e.message)}</div>`
+  }
+}
+
+function renderTrackingList(follows) {
+  const el = document.getElementById('tracking-list')
+  if (!el) return
+  if (!follows.length) {
+    el.innerHTML = `<div class="text-center py-10 text-gray-400">
+      <div class="text-3xl mb-2">📌</div>
+      <div class="text-sm">No keywords followed yet.</div>
+      <div class="text-xs mt-1">Use the 📌 button in Search Console or Keyword Research to follow keywords.</div>
+    </div>`
+    return
+  }
+
+  const posBadge = pos => {
+    if (pos == null) return '<span class="text-gray-300">—</span>'
+    const col = pos<=3?'text-green-600 font-bold':pos<=10?'text-blue-600':pos<=20?'text-yellow-600':'text-gray-500'
+    return `<span class="${col}">#${pos.toFixed(1)}</span>`
+  }
+
+  const changeBadge = ch => {
+    if (ch == null) return '<span class="text-gray-300">—</span>'
+    if (ch > 0) return `<span class="text-green-600 text-xs">▲${ch}</span>`
+    if (ch < 0) return `<span class="text-red-500 text-xs">▼${Math.abs(ch)}</span>`
+    return `<span class="text-gray-400 text-xs">—</span>`
+  }
+
+  el.innerHTML = `
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b border-gray-100 text-xs text-gray-400 uppercase">
+          <th class="text-left py-2 px-3">Keyword</th>
+          <th class="text-right py-2 px-3">Position</th>
+          <th class="text-right py-2 px-3">Change</th>
+          <th class="text-right py-2 px-3">Clicks</th>
+          <th class="text-right py-2 px-3">Impressions</th>
+          <th class="text-right py-2 px-3">Volume/mo</th>
+          <th class="text-right py-2 px-3">Last Updated</th>
+          <th class="py-2 px-3"></th>
+        </tr></thead>
+        <tbody>
+          ${follows.map(f => {
+            const lat = f.latest
+            return `<tr class="border-b border-gray-50 table-row">
+              <td class="py-2 px-3">
+                <div class="font-medium text-gray-800">${esc(f.keyword)}</div>
+                <div class="text-xs text-gray-400">${esc(f.source)}</div>
+              </td>
+              <td class="text-right py-2 px-3">${posBadge(lat?.position)}</td>
+              <td class="text-right py-2 px-3">${changeBadge(f.position_change)}</td>
+              <td class="text-right py-2 px-3 text-gray-600">${lat?.clicks != null ? lat.clicks.toLocaleString() : '<span class="text-gray-300">—</span>'}</td>
+              <td class="text-right py-2 px-3 text-gray-600">${lat?.impressions != null ? lat.impressions.toLocaleString() : '<span class="text-gray-300">—</span>'}</td>
+              <td class="text-right py-2 px-3 text-gray-600">${lat?.volume != null ? lat.volume.toLocaleString() : '<span class="text-gray-300">—</span>'}</td>
+              <td class="text-right py-2 px-3 text-xs text-gray-400">${lat?.date || '<span class="text-gray-300">No data</span>'}</td>
+              <td class="py-2 px-3 action-btns">
+                <div class="flex gap-1 justify-end">
+                  <button class="btn btn-secondary btn-sm" onclick="viewKeywordHistory(${f.id},'${esc(f.keyword)}')" title="View history">📈</button>
+                  <button class="btn btn-danger btn-sm" onclick="unfollowKeyword(${f.id},'${esc(f.keyword)}')" title="Unfollow">✕</button>
+                </div>
+              </td>
+            </tr>`
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`
+}
+
+async function triggerCollect(btnEl) {
+  const shopParam = S.currentShop ? `?shop_domain=${encodeURIComponent(S.currentShop)}` : ''
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<span class="spinner"></span> Collecting…' }
+  try {
+    const res = await POST('/api/v1/tracking/collect' + shopParam, null)
+    toast(`Collected ${res.collected} snapshots for ${res.date}`, 'success')
+    await loadTrackingList()
+  } catch(e) {
+    toast('Collect failed: ' + e.message, 'error')
+  } finally {
+    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '↻ Collect Now' }
+  }
+}
+
+function openAddFollowModal() {
+  openModal('Follow a Keyword', `
+    <div class="space-y-3">
+      <div>
+        <label>Keyword</label>
+        <input type="text" id="follow-kw-input" placeholder="e.g. running shoes for women"
+          onkeyup="if(event.key==='Enter')doAddFollow()">
+      </div>
+      <div>
+        <label>Source</label>
+        <select id="follow-kw-source">
+          <option value="manual">Manual</option>
+          <option value="gsc">Search Console</option>
+          <option value="research">Keyword Research</option>
+        </select>
+      </div>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+     <button class="btn btn-primary" onclick="doAddFollow()">📌 Follow</button>`)
+  setTimeout(() => document.getElementById('follow-kw-input')?.focus(), 100)
+}
+
+async function doAddFollow() {
+  const kw = document.getElementById('follow-kw-input')?.value?.trim()
+  const source = document.getElementById('follow-kw-source')?.value || 'manual'
+  if (!kw) { toast('Enter a keyword', 'error'); return }
+  if (!S.currentShop) { toast('Select a store first', 'error'); return }
+  try {
+    await POST('/api/v1/tracking/follow', { keyword: kw, shop_domain: S.currentShop, source })
+    toast(`📌 Now following: ${kw}`, 'success')
+    closeModal()
+    await loadTrackingList()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function unfollowKeyword(id, keyword) {
+  if (!confirm(`Stop tracking "${keyword}"?`)) return
+  try {
+    await DEL(`/api/v1/tracking/follow/${id}`)
+    toast(`Unfollowed: ${keyword}`, 'success')
+    await loadTrackingList()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function viewKeywordHistory(followId, keyword) {
+  openModal(`📈 ${keyword}`, `<div class="flex justify-center py-10"><div class="spinner-dark"></div></div>`, '')
+  try {
+    const data = await GET(`/api/v1/tracking/follows/${followId}/history?days=90`)
+    renderKeywordHistoryModal(data)
+  } catch(e) {
+    document.getElementById('modal-body').innerHTML = `<div class="text-red-500 text-sm">Error: ${esc(e.message)}</div>`
+  }
+}
+
+function renderKeywordHistoryModal(data) {
+  const hist = data.history || []
+  const el = document.getElementById('modal-body')
+  if (!el) return
+
+  if (!hist.length) {
+    el.innerHTML = `<div class="text-center py-8 text-gray-400">No history data yet. Run a collection first.</div>`
+    return
+  }
+
+  const posBadge = pos => {
+    if (pos == null) return '—'
+    const col = pos<=3?'text-green-600 font-bold':pos<=10?'text-blue-600':pos<=20?'text-yellow-600':'text-gray-500'
+    return `<span class="${col}">#${pos.toFixed(1)}</span>`
+  }
+
+  // Sparkline SVG from position data
+  const positions = hist.map(h => h.position).filter(p => p != null)
+  let sparklineSvg = ''
+  if (positions.length >= 2) {
+    const w = 400, h = 60, pad = 4
+    const maxP = Math.max(...positions), minP = Math.min(...positions)
+    const range = maxP - minP || 1
+    const pts = positions.map((p, i) => {
+      const x = pad + (i / (positions.length - 1)) * (w - pad*2)
+      const y = h - pad - ((p - minP) / range) * (h - pad*2)
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    }).join(' ')
+    sparklineSvg = `<div class="mb-4">
+      <div class="text-xs text-gray-400 mb-1">Position trend (lower = better)</div>
+      <svg viewBox="0 0 ${w} ${h}" class="w-full h-16 border border-gray-100 rounded-lg bg-gray-50">
+        <polyline points="${pts}" fill="none" stroke="rgb(79,70,229)" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
+    </div>`
+  }
+
+  el.innerHTML = `
+    ${sparklineSvg}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b border-gray-100 text-xs text-gray-400 uppercase">
+          <th class="text-left py-1.5 px-2">Date</th>
+          <th class="text-right py-1.5 px-2">Position</th>
+          <th class="text-right py-1.5 px-2">Clicks</th>
+          <th class="text-right py-1.5 px-2">Impressions</th>
+          <th class="text-right py-1.5 px-2">CTR</th>
+          <th class="text-right py-1.5 px-2">Volume</th>
+        </tr></thead>
+        <tbody>
+          ${[...hist].reverse().map(h => `
+            <tr class="border-b border-gray-50">
+              <td class="py-1.5 px-2 text-gray-600">${esc(h.date||'')}</td>
+              <td class="text-right py-1.5 px-2">${posBadge(h.position)}</td>
+              <td class="text-right py-1.5 px-2 text-gray-600">${h.clicks != null ? h.clicks.toLocaleString() : '—'}</td>
+              <td class="text-right py-1.5 px-2 text-gray-600">${h.impressions != null ? h.impressions.toLocaleString() : '—'}</td>
+              <td class="text-right py-1.5 px-2 text-gray-600">${h.ctr != null ? (h.ctr*100).toFixed(1)+'%' : '—'}</td>
+              <td class="text-right py-1.5 px-2 text-gray-600">${h.volume != null ? h.volume.toLocaleString() : '—'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`
 }
 
 // ═══════════════════ SHOPIFY CONNECT ═════════════════════════

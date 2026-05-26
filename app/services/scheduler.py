@@ -60,12 +60,26 @@ async def _publish_due_posts():
         db.close()
 
 
+async def _collect_keyword_snapshots():
+    from app.database import SessionLocal
+    from app.api.tracking_routes import _collect_all
+    db = SessionLocal()
+    try:
+        count = await _collect_all(db)
+        logger.info("Keyword tracking: collected %d snapshots", count)
+    except Exception as e:
+        logger.error("Keyword snapshot collection failed: %s", e)
+    finally:
+        db.close()
+
+
 def start():
     global _scheduler
     _scheduler = AsyncIOScheduler()
     _scheduler.add_job(_publish_due_posts, "interval", minutes=1, id="publish_scheduled")
+    _scheduler.add_job(_collect_keyword_snapshots, "cron", hour=2, minute=0, id="keyword_tracking")
     _scheduler.start()
-    logger.info("Scheduler started — checking for scheduled posts every minute")
+    logger.info("Scheduler started — publishing check every minute, keyword tracking daily at 02:00")
 
 
 def stop():

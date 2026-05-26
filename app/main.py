@@ -12,6 +12,7 @@ from app.api.auth_routes import auth_router
 from app.api.content_routes import generate_router, research_router, topics_router
 from app.api.init_routes import blog_router, router as init_router
 from app.api.knowledge_routes import knowledge_router
+from app.api.tracking_routes import tracking_router
 from app.api.product_routes import product_router
 from app.api.publish_routes import publish_router
 from app.api.settings_routes import settings_router
@@ -27,6 +28,7 @@ from app.models import crawl_job as _cj            # ensure crawl_jobs table is 
 from app.models import system_settings as _ss      # ensure system_settings table is registered
 from app.models import product as _prod            # ensure products table is registered
 from app.models import platform_guideline as _pg   # ensure platform_guidelines table is registered
+from app.models import keyword_follow as _kf       # ensure keyword_follows/keyword_history tables
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +131,7 @@ app.include_router(product_router)
 app.include_router(publish_router)
 app.include_router(settings_router)
 app.include_router(knowledge_router)
+app.include_router(tracking_router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
