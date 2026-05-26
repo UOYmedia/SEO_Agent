@@ -59,6 +59,7 @@ def _migrate_columns():
         ("scheduled_at",        "TIMESTAMP"),
         ("scheduled_blog_id",   "VARCHAR(100)"),
         ("semantic_keywords",   "TEXT"),
+        ("created_at",          "TIMESTAMP"),
     ])
 
     add_cols("brand_profiles", [
