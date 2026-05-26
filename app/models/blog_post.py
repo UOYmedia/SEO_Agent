@@ -74,6 +74,7 @@ class BlogPost(Base):
     # State
     status = Column(Enum(PostStatus), default=PostStatus.PUBLISHED)
     source = Column(String(50), default="synced")        # 'synced' | 'generated'
+    created_at = Column(DateTime, default=datetime.utcnow)
     published_at = Column(DateTime)
     synced_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
