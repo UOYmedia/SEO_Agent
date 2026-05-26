@@ -99,6 +99,10 @@ def _migrate_columns():
         ("topic_cluster_id", "INTEGER"),
     ])
 
+    add_cols("keyword_follows", [
+        ("source", "VARCHAR(50)"),
+    ])
+
     try:
         with engine.begin() as conn:
             _backfill_shop_domain(conn)
