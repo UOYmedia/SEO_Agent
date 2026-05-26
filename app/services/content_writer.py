@@ -351,13 +351,14 @@ Respond in this exact format:
             platform_guideline=platform_guideline,
         )
 
+        messages = [m for m in [
+            {"role": "system", "content": system} if system.strip() else None,
+            {"role": "user",   "content": user}   if user.strip()   else None,
+        ] if m]
         message = self.client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             max_tokens=5000,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            messages=messages,
         )
 
         raw = message.choices[0].message.content
@@ -437,13 +438,14 @@ Rules:
 Return ONLY a JSON array of {count} strings, no commentary. Example:
 ["Best Wireless Earbuds for Running in 2025", "How to Pick Running Earbuds That Don't Fall Out"]"""
 
+        sg_messages = [m for m in [
+            {"role": "system", "content": system} if system.strip() else None,
+            {"role": "user",   "content": user}   if user.strip()   else None,
+        ] if m]
         message = self.client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             max_tokens=600,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user",   "content": user},
-            ],
+            messages=sg_messages,
         )
         raw = (message.choices[0].message.content or "").strip()
         match = re.search(r"\[.*\]", raw, re.DOTALL)
@@ -533,13 +535,14 @@ Respond in this exact format:
 {{"seo_title": "60-char SEO title", "meta_description": "155-char description with keyword", "tags": ["tag1","tag2","tag3"], "image_prompt": "DALL-E prompt for a professional blog banner"}}
 </meta>"""
 
+        rw_messages = [m for m in [
+            {"role": "system", "content": system} if system.strip() else None,
+            {"role": "user",   "content": user}   if user.strip()   else None,
+        ] if m]
         message = self.client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             max_tokens=5000,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user",   "content": user},
-            ],
+            messages=rw_messages,
         )
         raw = message.choices[0].message.content
         article_match = re.search(r"<article>(.*?)</article>", raw, re.DOTALL)

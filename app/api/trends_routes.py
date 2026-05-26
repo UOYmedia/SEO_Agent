@@ -104,6 +104,13 @@ async def explore_trends(body: TrendsExploreRequest):
     except Exception as e:
         raise HTTPException(502, f"DataForSEO request failed: {e}")
 
+    # Check task-level status codes
+    for task in data.get("tasks", []):
+        tc = task.get("status_code")
+        if tc and tc != 20000:
+            logger.warning("DataForSEO Google Trends task error %s: %s", tc, task.get("status_message"))
+            raise HTTPException(402, f"DataForSEO task error {tc}: {task.get('status_message', 'unknown')} — your plan may not include Google Trends data")
+
     timeline = []
     top_queries = []
     rising_queries = []
@@ -162,6 +169,12 @@ async def keyword_ideas(body: KeywordIdeasRequest):
         raise HTTPException(e.response.status_code, f"DataForSEO error: {e.response.text[:200]}")
     except Exception as e:
         raise HTTPException(502, f"DataForSEO request failed: {e}")
+
+    for task in data.get("tasks", []):
+        tc = task.get("status_code")
+        if tc and tc != 20000:
+            logger.warning("DataForSEO keyword ideas task error %s: %s", tc, task.get("status_message"))
+            raise HTTPException(402, f"DataForSEO task error {tc}: {task.get('status_message', 'unknown')} — check your DataForSEO plan")
 
     keywords = []
     for task in data.get("tasks", []):

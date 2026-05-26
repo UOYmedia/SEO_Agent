@@ -268,6 +268,7 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
                 "brand_description": bp.brand_description,
                 "tone_of_voice": bp.tone_of_voice,
                 "output_requirements": bp.output_requirements,
+                "writing_notes": getattr(bp, "writing_notes", None),
             }
     except Exception:
         pass
@@ -412,6 +413,7 @@ async def rewrite_article(
             "brand_name": bp.brand_name, "brand_style": bp.brand_style,
             "brand_description": bp.brand_description, "tone_of_voice": bp.tone_of_voice,
             "output_requirements": bp.output_requirements,
+            "writing_notes": getattr(bp, "writing_notes", None),
         }
 
     # Load feedback lessons
