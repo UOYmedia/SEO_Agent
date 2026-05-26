@@ -1090,10 +1090,10 @@ async function openPublishModal(postId, title) {
         <div class="space-y-1">
           ${audit.warnings.map(w => `<div class="text-xs text-amber-700 flex gap-1.5"><span>⚠</span><span>${esc(w)}</span></div>`).join('')}
         </div>` : ''}
-      ${audit.semantic_keywords?.length ? `
+      ${(() => { const sk = typeof audit.semantic_keywords === 'string' ? JSON.parse(audit.semantic_keywords || '[]') : (audit.semantic_keywords || []); return sk.length ? `
         <div class="text-xs text-gray-500 pt-1 border-t border-current border-opacity-20">
-          <span class="font-medium">Semantic keywords:</span> ${audit.semantic_keywords.map(k => `<span class="inline-block bg-white border rounded px-1 mr-1 mb-1">${esc(k)}</span>`).join('')}
-        </div>` : ''}
+          <span class="font-medium">Semantic keywords:</span> ${sk.map(k => `<span class="inline-block bg-white border rounded px-1 mr-1 mb-1">${esc(k)}</span>`).join('')}
+        </div>` : ''; })()}
       <div class="flex gap-4 text-xs text-gray-500 pt-1">
         <span>🔗 Internal: <strong>${audit.internal_link_count ?? '—'}</strong></span>
         <span>🌐 External: <strong>${audit.external_link_count ?? '—'}</strong></span>
