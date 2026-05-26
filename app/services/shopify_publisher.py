@@ -1,6 +1,6 @@
 """
 Publish AI-generated articles to Shopify via Admin GraphQL API.
-REST /articles.json is deprecated in 2025-07+; this uses articleCreate mutation.
+REST /articles.json is deprecated in 2025-07+; this uses articleCreate/articleUpdate mutations.
 Image is passed as a URL (DALL-E temp URL) — Shopify fetches and hosts it.
 """
 from datetime import datetime
@@ -17,8 +17,19 @@ _ARTICLE_CREATE = """
 mutation ArticleCreate($article: ArticleCreateInput!) {
   articleCreate(article: $article) {
     article {
-      id
-      handle
+      id handle onlineStoreUrl
+      image { url altText }
+    }
+    userErrors { field message }
+  }
+}
+"""
+
+_ARTICLE_UPDATE = """
+mutation ArticleUpdate($id: ID!, $article: ArticleUpdateInput!) {
+  articleUpdate(id: $id, article: $article) {
+    article {
+      id handle onlineStoreUrl
       image { url altText }
     }
     userErrors { field message }
@@ -85,20 +96,12 @@ class ShopifyPublisher:
         image_alt: Optional[str] = None,
     ) -> dict:
         """
-        Create a Shopify article via GraphQL articleCreate mutation.
-        blog_id: numeric Shopify blog ID (e.g. 12345678).
-        image_url: public URL that Shopify will fetch and host (e.g. DALL-E URL).
-        Returns the created article node dict.
+        Create or update a Shopify article via GraphQL.
+        - post.platform_id exists → articleUpdate (edit in-place on Shopify)
+        - no platform_id          → articleCreate (new article)
+        Returns the article node dict.
         """
-        article_input: dict = {
-            "blogId": f"gid://shopify/Blog/{blog_id}",
-            "title": post.title,
-            "body": post.content_html or "",
-            "summary": post.excerpt_html or "",
-            "author": {"name": author},
-            "tags": post.tags or [],
-            "isPublished": published,
-        }
+        image_input = None
         if image_url:
             absolute_url = self._absolute_url(image_url)
             if not absolute_url:
@@ -107,19 +110,49 @@ class ShopifyPublisher:
                     f"({image_url}) and APP_URL is not configured. Set APP_URL "
                     f"in settings so Shopify can fetch the image."
                 )
-            # ArticleImageInput uses `url` (older Shopify versions used `src`)
-            article_input["image"] = {
-                "url": absolute_url,
-                "altText": (image_alt or post.title)[:512],
+            image_input = {"url": absolute_url, "altText": (image_alt or post.title)[:512]}
+
+        # ── UPDATE existing article ──────────────────────────────────────────
+        if post.platform_id:
+            gid = (
+                post.platform_id
+                if str(post.platform_id).startswith("gid://")
+                else f"gid://shopify/Article/{post.platform_id}"
+            )
+            update_input: dict = {
+                "title":       post.title,
+                "body":        post.content_html or "",
+                "summary":     post.excerpt_html or "",
+                "author":      {"name": author},
+                "tags":        post.tags or [],
+                "isPublished": published,
             }
+            if image_input:
+                update_input["image"] = image_input
+            data   = await self._gql(_ARTICLE_UPDATE, {"id": gid, "article": update_input})
+            result = data["articleUpdate"]
+            if result["userErrors"]:
+                msgs = "; ".join(f"{e['field']}: {e['message']}" for e in result["userErrors"])
+                raise ValueError(f"Shopify userErrors (update): {msgs}")
+            return result["article"]
 
-        data = await self._gql(_ARTICLE_CREATE, {"article": article_input})
+        # ── CREATE new article ───────────────────────────────────────────────
+        create_input: dict = {
+            "blogId":      f"gid://shopify/Blog/{blog_id}",
+            "title":       post.title,
+            "body":        post.content_html or "",
+            "summary":     post.excerpt_html or "",
+            "author":      {"name": author},
+            "tags":        post.tags or [],
+            "isPublished": published,
+        }
+        if image_input:
+            create_input["image"] = image_input
+        data   = await self._gql(_ARTICLE_CREATE, {"article": create_input})
         result = data["articleCreate"]
-
         if result["userErrors"]:
             msgs = "; ".join(f"{e['field']}: {e['message']}" for e in result["userErrors"])
-            raise ValueError(f"Shopify userErrors: {msgs}")
-
+            raise ValueError(f"Shopify userErrors (create): {msgs}")
         return result["article"]
 
     def sync_after_publish(
