@@ -2110,9 +2110,17 @@ function renderAuditBlogResults(results) {
             </tr>
             <tr id="audit-expand-${i}" class="hidden bg-gray-50">
               <td colspan="6" class="px-4 py-3">
-                <div class="space-y-1">
+                <div class="space-y-1 mb-3">
                   ${r.issues.length ? r.issues.map(issue => `<div class="text-xs text-amber-700 bg-amber-50 rounded px-3 py-1.5">⚠ ${esc(issue)}</div>`).join('') : '<div class="text-xs text-green-700 bg-green-50 rounded px-3 py-1.5">✅ Post looks good!</div>'}
+                  ${r.warnings?.length ? r.warnings.map(w => `<div class="text-xs text-gray-500 bg-gray-50 rounded px-3 py-1.5">💡 ${esc(w)}</div>`).join('') : ''}
                 </div>
+                <div class="flex gap-2 items-center flex-wrap" id="audit-fix-bar-${i}">
+                  ${r.issues.length || r.cta_external_leaks?.length ? `
+                    <button class="btn btn-primary btn-sm" onclick="auditAutoFix(${r.post_id},${i})">🔧 Auto-Fix Issues</button>
+                  ` : ''}
+                  <button class="btn btn-secondary btn-sm" onclick="viewPost(${r.post_id})">📝 Open Post</button>
+                </div>
+                <div id="audit-fix-result-${i}" class="mt-2"></div>
               </td>
             </tr>`).join('')}
         </tbody>
@@ -2124,6 +2132,41 @@ function renderAuditBlogResults(results) {
 function toggleAuditRow(i) {
   const el = document.getElementById('audit-expand-'+i)
   if (el) el.classList.toggle('hidden')
+}
+
+async function auditAutoFix(postId, rowIdx) {
+  const bar = document.getElementById(`audit-fix-bar-${rowIdx}`)
+  const res = document.getElementById(`audit-fix-result-${rowIdx}`)
+  if (!bar || !res) return
+  bar.innerHTML = `<span class="spinner-dark"></span><span class="text-xs text-gray-500 ml-2">AI is fixing SEO issues… this may take 30–60s</span>`
+  res.innerHTML = ''
+  try {
+    const r = await POST(`/api/v1/audit/posts/${postId}/fix`, {})
+    if (!r.changed) {
+      bar.innerHTML = `<div class="text-xs text-green-700 bg-green-50 rounded px-3 py-1.5">✅ ${esc(r.message)}</div>`
+      return
+    }
+    const scoreDelta = r.after.score - r.before.score
+    const deltaStr = scoreDelta >= 0 ? `+${scoreDelta}` : `${scoreDelta}`
+    const deltaColor = scoreDelta > 0 ? 'text-green-600' : 'text-gray-500'
+    bar.innerHTML = `
+      <button class="btn btn-secondary btn-sm" onclick="viewPost(${postId})">📝 Review Fixed Post</button>
+      <button class="btn btn-success btn-sm" onclick="openPublishModal(${postId},'')">🚀 Publish</button>`
+    res.innerHTML = `
+      <div class="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg text-xs">
+        <div class="font-semibold text-green-800 mb-1">✅ Auto-fix complete — saved as draft</div>
+        <div class="flex gap-4">
+          <span class="text-gray-500">Before: <strong>${r.before.score}/100</strong> (${r.before.grade})</span>
+          <span class="${deltaColor}">After: <strong>${r.after.score}/100</strong> (${r.after.grade}) <strong>${deltaStr} pts</strong></span>
+        </div>
+        ${r.after.issues.length ? `<div class="mt-1 text-amber-700">Remaining: ${r.after.issues.map(x=>esc(x)).join(' · ')}</div>` : '<div class="mt-1 text-green-700">No remaining issues 🎉</div>'}
+      </div>`
+    toast('🔧 Auto-fix complete — post saved as draft', 'success')
+  } catch(e) {
+    bar.innerHTML = `<button class="btn btn-primary btn-sm" onclick="auditAutoFix(${postId},${rowIdx})">🔧 Auto-Fix Issues</button>
+      <button class="btn btn-secondary btn-sm" onclick="viewPost(${postId})">📝 Open Post</button>`
+    res.innerHTML = `<div class="text-xs text-red-500 mt-1">Fix failed: ${esc(e.message)}</div>`
+  }
 }
 
 function renderAuditRankingsTab() {

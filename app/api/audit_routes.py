@@ -14,6 +14,87 @@ from app.config import settings
 audit_router = APIRouter(prefix="/api/v1/audit", tags=["audit"])
 
 
+def _audit_to_instructions(audit: dict) -> str:
+    """Convert audit result into a concrete rewrite instruction string."""
+    lines = ["Fix all SEO issues found in this article. Apply every fix below:"]
+
+    if audit.get("cta_external_leaks"):
+        leaks = ", ".join(f'"{t}"' for t in audit["cta_external_leaks"])
+        lines.append(
+            f"1. CTA LINK FIX (critical): The phrases {leaks} are linked to external domains. "
+            "Replace every external link on CTA/navigational phrases with an internal link "
+            "(use an existing related article URL, or remove the link entirely). "
+            "NEVER link 'learn more', 'read more', 'discover', 'explore', etc. to external sites."
+        )
+
+    for i, issue in enumerate(audit.get("issues", []), start=2):
+        lower = issue.lower()
+        if "word" in lower and "short" in lower or "only" in lower and "word" in lower:
+            lines.append(
+                f"{i}. WORD COUNT: Expand the article to at least 1500 words. "
+                "Add more depth to existing sections and include new relevant subtopics."
+            )
+        elif "keyword" in lower and "title" in lower:
+            lines.append(
+                f"{i}. TITLE KEYWORD: Rewrite the title to include the focus keyword "
+                f"'{audit.get('focus_keyword', '')}' naturally within 50-60 characters."
+            )
+        elif "density" in lower and "low" in lower:
+            lines.append(
+                f"{i}. KEYWORD DENSITY: Increase natural usage of the focus keyword "
+                f"'{audit.get('focus_keyword', '')}' throughout the article (target 1-3%)."
+            )
+        elif "density" in lower and "high" in lower:
+            lines.append(
+                f"{i}. KEYWORD DENSITY: Reduce keyword repetition — it looks spammy. "
+                "Use synonyms and related terms instead of repeating the exact keyword."
+            )
+        elif "h2" in lower or "heading" in lower:
+            lines.append(
+                f"{i}. HEADINGS: Add at least 3 descriptive H2 section headings that include "
+                "keyword variations and clearly divide the article into logical sections."
+            )
+        elif "internal link" in lower:
+            lines.append(
+                f"{i}. INTERNAL LINKS: Add 2-4 internal links to related content. "
+                "Use descriptive anchor text (not 'click here')."
+            )
+        elif "alt text" in lower or "missing alt" in lower:
+            lines.append(
+                f"{i}. IMAGE ALT TEXT: Add descriptive alt text to all images, "
+                "including the focus keyword where relevant."
+            )
+        elif "featured image" in lower:
+            lines.append(f"{i}. FEATURED IMAGE: Ensure a featured image is set for this article.")
+        elif "title" in lower and "char" in lower:
+            lines.append(
+                f"{i}. TITLE LENGTH: Rewrite the title to be between 50-60 characters "
+                "for optimal search display."
+            )
+        else:
+            lines.append(f"{i}. {issue}")
+
+    for w in audit.get("warnings", []):
+        if "semantic" in w.lower() or "coverage" in w.lower():
+            kws = audit.get("semantic_keywords", [])
+            if kws:
+                lines.append(
+                    f"SEMANTIC KEYWORDS: Naturally integrate more of these related terms "
+                    f"into the content: {', '.join(kws[:8])}."
+                )
+        elif "rel=" in w.lower() or "noopener" in w.lower():
+            lines.append(
+                "EXTERNAL LINKS: Add target=\"_blank\" rel=\"noopener noreferrer\" "
+                "to all external links."
+            )
+
+    lines.append(
+        "\nIMPORTANT: Keep the article's main topic, tone, and structure intact. "
+        "Only fix the specific issues listed above. Do NOT change the article title."
+    )
+    return "\n".join(lines)
+
+
 @audit_router.get("/pre-publish/{post_id}")
 def pre_publish_audit(
     post_id: int,
@@ -67,6 +148,73 @@ def audit_single_post(
     if post.shop_domain:
         check_store_scope(user, post.shop_domain, "audit", db)
     return SeoAuditor().audit_post(post)
+
+
+@audit_router.post("/posts/{post_id}/fix")
+async def auto_fix_post(
+    post_id: int,
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Auto-fix SEO issues: audit → generate instructions → rewrite → save draft."""
+    post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+    if post.shop_domain:
+        check_store_scope(user, post.shop_domain, "write", db)
+
+    # 1. Audit current state
+    audit = SeoAuditor().audit_post(post)
+    if not audit["issues"] and not audit.get("cta_external_leaks"):
+        return {"message": "No issues found — post is already optimised.", "audit": audit, "changed": False}
+
+    # 2. Build fix instructions from audit
+    instructions = _audit_to_instructions(audit)
+
+    # 3. Load brand profile
+    brand_profile = None
+    try:
+        from app.models.brand_profile import BrandProfile
+        bp = db.query(BrandProfile).filter_by(shop_domain=post.shop_domain).first()
+        if not bp and post.shop_domain:
+            bp = db.query(BrandProfile).filter_by(shop_domain=None).first()
+        if bp:
+            brand_profile = {
+                "brand_name": bp.brand_name, "brand_style": bp.brand_style,
+                "brand_description": bp.brand_description, "tone_of_voice": bp.tone_of_voice,
+                "output_requirements": bp.output_requirements,
+            }
+    except Exception:
+        pass
+
+    # 4. Rewrite
+    from app.services.content_writer import ContentWriter
+    from app.models.blog_post import PostStatus
+    writer = ContentWriter()
+    result = await writer.rewrite(post=post, instructions=instructions, brand_profile=brand_profile)
+
+    # 5. Save
+    post.content_html    = result["content_html"]
+    post.seo_title       = result["seo_title"]
+    post.seo_description = result["seo_description"]
+    post.tags            = result["tags"]
+    if result.get("image_prompt"):
+        post.image_prompt = result["image_prompt"]
+    post.status = PostStatus.DRAFT
+    db.commit()
+    db.refresh(post)
+
+    # 6. Re-audit to show improvement
+    new_audit = SeoAuditor().audit_post(post)
+
+    return {
+        "changed": True,
+        "post_id": post.id,
+        "instructions_used": instructions,
+        "before": {"score": audit["score"], "grade": audit["grade"], "issues": audit["issues"]},
+        "after":  {"score": new_audit["score"], "grade": new_audit["grade"], "issues": new_audit["issues"]},
+        "usage": result.get("usage"),
+    }
 
 
 class RankingsRequest(BaseModel):
