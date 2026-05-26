@@ -121,7 +121,7 @@ def list_posts(
         )
 
     total = q.count()
-    posts = q.order_by(BlogPost.created_at.desc().nullslast(), BlogPost.id.desc()).offset((page - 1) * limit).limit(limit).all()
+    posts = q.order_by(BlogPost.updated_at.desc().nullslast(), BlogPost.id.desc()).offset((page - 1) * limit).limit(limit).all()
     total_pages = (total + limit - 1) // limit if total else 0
     return PaginatedPosts(items=posts, total=total, page=page, limit=limit, total_pages=total_pages)
 
