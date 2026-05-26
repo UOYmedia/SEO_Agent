@@ -82,8 +82,13 @@ def get_topic_cluster(cluster_id: int, db: Session = Depends(get_db)):
         "questions": cluster.questions or [],
     }
     if cluster.plan_json:
-        result.update(cluster.plan_json)
-        result["id"] = cluster.id  # ensure id not overwritten
+        import json as _json
+        try:
+            plan = cluster.plan_json if isinstance(cluster.plan_json, dict) else _json.loads(cluster.plan_json)
+            result.update(plan)
+            result["id"] = cluster.id  # ensure id not overwritten
+        except Exception:
+            pass
     else:
         import json as _json
         try:
