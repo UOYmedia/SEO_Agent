@@ -66,8 +66,25 @@ label { display: block; font-size: 13px; font-weight: 500; color: rgb(55 65 81);
 .table-row:hover td { background: rgb(249 250 251); }
 .action-btns { opacity: 0; transition: opacity .15s; }
 .table-row:hover .action-btns { opacity: 1; }
+/* Quill WYSIWYG editor overrides */
+.ql-toolbar.ql-snow { border-radius: 8px 8px 0 0; border-color: rgb(209 213 219); background: rgb(249 250 251); padding: 6px 8px; flex-wrap: wrap; }
+.ql-container.ql-snow { border-radius: 0 0 8px 8px; border-color: rgb(209 213 219); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; }
+.ql-editor { min-height: 300px; max-height: 480px; overflow-y: auto; line-height: 1.7; }
+.ql-editor h1 { font-size: 1.6em; font-weight: 700; margin: .75em 0 .4em; }
+.ql-editor h2 { font-size: 1.3em; font-weight: 600; margin: .7em 0 .35em; }
+.ql-editor h3 { font-size: 1.1em; font-weight: 600; margin: .6em 0 .3em; }
+.ql-editor p  { margin: 0 0 .6em; }
+.ql-editor ul, .ql-editor ol { padding-left: 1.4em; margin: .4em 0 .8em; }
+.ql-editor a  { color: rgb(79 70 229); text-decoration: underline; }
+.ql-editor blockquote { border-left: 3px solid rgb(209 213 219); margin: .6em 0; padding-left: .8em; color: rgb(107 114 128); }
+.ql-snow .ql-toolbar button:hover, .ql-snow .ql-toolbar button.ql-active { color: rgb(79 70 229); }
+.ql-snow .ql-toolbar .ql-stroke { stroke: currentColor; }
+.ql-snow .ql-toolbar .ql-fill  { fill:   currentColor; }
+.ed-tab-btn { padding: 5px 14px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; background: transparent; color: rgb(107 114 128); transition: all .15s; }
+.ed-tab-btn.active { background: rgb(79 70 229); color: white; border-radius: 6px; }
 </style>
-</head>
+<link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
 <body class="bg-gray-100 h-screen flex overflow-hidden">
 
 <!-- ── Sidebar ─────────────────────────────────────────────── -->
@@ -232,6 +249,8 @@ function openModal(title, bodyHtml, footerHtml = '') {
 }
 function closeModal() {
   document.getElementById('modal-bg').classList.add('hidden')
+  // Destroy Quill instance to avoid memory leaks
+  if (_quill) { _quill = null }
 }
 
 // ═══════════════════════════ NAV ═════════════════════════════
@@ -776,6 +795,61 @@ function _renderViewPost(id, p) {
 }
 
 // ─────────────────── Edit draft ──────────────────────────────
+// ─────────────────── WYSIWYG Editor (Quill) ───────────────────
+let _quill = null
+
+function edInitQuill(html) {
+  const host = document.getElementById('ed-quill-host')
+  if (!host) return
+  _quill = new Quill(host, {
+    theme: 'snow',
+    modules: {
+      toolbar: [
+        [{ header: [1, 2, 3, 4, false] }],
+        ['bold', 'italic', 'underline', 'strike'],
+        [{ list: 'ordered' }, { list: 'bullet' }],
+        ['link', 'blockquote'],
+        [{ align: [] }],
+        ['clean'],
+      ],
+    },
+  })
+  if (html) _quill.clipboard.dangerouslyPasteHTML(html)
+}
+
+function edSwitchTab(tab) {
+  const visualWrap = document.getElementById('ed-visual-wrap')
+  const htmlWrap   = document.getElementById('ed-html-wrap')
+  const tabVisual  = document.getElementById('ed-tab-visual')
+  const tabHtml    = document.getElementById('ed-tab-html')
+  const textarea   = document.getElementById('ed-content')
+
+  if (tab === 'html') {
+    // Sync Quill → textarea then show textarea
+    if (_quill) textarea.value = _quill.root.innerHTML
+    visualWrap.classList.add('hidden')
+    htmlWrap.classList.remove('hidden')
+    tabHtml.classList.add('active'); tabVisual.classList.remove('active')
+  } else {
+    // Sync textarea → Quill then show Quill
+    if (_quill && textarea) _quill.clipboard.dangerouslyPasteHTML(textarea.value || '')
+    htmlWrap.classList.add('hidden')
+    visualWrap.classList.remove('hidden')
+    tabVisual.classList.add('active'); tabHtml.classList.remove('active')
+    // Re-focus Quill
+    setTimeout(() => _quill?.focus(), 50)
+  }
+}
+
+function edGetContent() {
+  // If HTML tab is visible, return textarea; otherwise Quill
+  const htmlWrap = document.getElementById('ed-html-wrap')
+  if (htmlWrap && !htmlWrap.classList.contains('hidden')) {
+    return document.getElementById('ed-content')?.value || ''
+  }
+  return _quill ? _quill.root.innerHTML : ''
+}
+
 async function editPost(id) {
   const p = await GET(`/api/v1/generate/article/${id}/content`).catch(e => { toast(e.message,'error'); return null })
   if (!p) return
@@ -800,13 +874,29 @@ async function editPost(id) {
       </div>
       <div id="image-section">${renderFeaturedImage(id, p, true)}</div>
       <div>
-        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Content HTML</label>
-        <textarea id="ed-content" rows="14" class="mt-1" style="font-family:monospace;font-size:12px">${esc(p.content_html||'')}</textarea>
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Content</label>
+          <div class="flex items-center gap-0.5 bg-gray-100 p-0.5 rounded-lg">
+            <button id="ed-tab-visual" class="ed-tab-btn active" onclick="edSwitchTab('visual')">🖊 Visual</button>
+            <button id="ed-tab-html"   class="ed-tab-btn"        onclick="edSwitchTab('html')">&lt;/&gt; HTML</button>
+          </div>
+        </div>
+        <!-- Visual (Quill) editor -->
+        <div id="ed-visual-wrap">
+          <div id="ed-quill-host"></div>
+        </div>
+        <!-- HTML source editor -->
+        <div id="ed-html-wrap" class="hidden">
+          <textarea id="ed-content" rows="18" style="font-family:'JetBrains Mono',Menlo,monospace;font-size:12px;border-radius:8px;resize:vertical"></textarea>
+        </div>
       </div>
     </div>`
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn btn-primary btn-sm" id="ed-save-btn" onclick="savePost(${id})">💾 Save Changes</button>
     <button class="btn btn-secondary btn-sm" onclick="viewPost(${id})">Cancel</button>`
+
+  // Init Quill after DOM is painted
+  requestAnimationFrame(() => edInitQuill(p.content_html || ''))
 }
 
 async function savePost(id) {
@@ -820,11 +910,11 @@ async function savePost(id) {
       seo_title:       document.getElementById('ed-seo-title').value.trim(),
       seo_description: document.getElementById('ed-meta').value.trim(),
       tags,
-      content_html:    document.getElementById('ed-content').value,
+      content_html:    edGetContent(),
     })
     toast('✅ Draft saved', 'success')
-    viewPost(id)          // return to view mode with fresh data
-    renderPosts()         // refresh list in background
+    viewPost(id)
+    renderPosts()
   } catch(e) {
     toast('Save failed: ' + e.message, 'error')
     btn.disabled = false; btn.textContent = '💾 Save Changes'
