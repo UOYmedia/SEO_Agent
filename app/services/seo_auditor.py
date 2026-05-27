@@ -145,6 +145,28 @@ class SeoAuditor:
         MAX_RAW = 115
         normalized = min(100, round(score * 100 / MAX_RAW))
 
+        return {
+            "post_id": post.id,
+            "title": title,
+            "url": post.platform_url,
+            "focus_keyword": keyword,
+            "word_count": word_count,
+            "title_length": title_len,
+            "h2_count": len(h2s),
+            "h3_count": len(h3s),
+            "image_count": len(images),
+            "images_missing_alt": len(missing_alt),
+            "internal_link_count": len(internal_links),
+            "external_link_count": len(external_links),
+            "cta_external_leaks": cta_external_leaks,
+            "semantic_keywords": semantic_kws,
+            "score": normalized,
+            "max_score": 100,
+            "grade": "A" if normalized >= 85 else "B" if normalized >= 70 else "C" if normalized >= 55 else "D" if normalized >= 40 else "F",
+            "issues": issues,
+            "warnings": warnings,
+        }
+
     # ── KB persistence ────────────────────────────────────────────────────────
 
     def save_to_kb(self, audit: dict, shop_domain: Optional[str], db) -> None:
@@ -184,29 +206,7 @@ class SeoAuditor:
                 source_type="audit_result",
                 shop_domain=shop_domain,
                 db=db,
-                auto_approve=True,   # immediately available to Learning Agent
+                auto_approve=True,
             )
         except Exception as exc:
             logger.warning("SeoAuditor.save_to_kb failed: %s", exc)
-
-        return {
-            "post_id": post.id,
-            "title": title,
-            "url": post.platform_url,
-            "focus_keyword": keyword,
-            "word_count": word_count,
-            "title_length": title_len,
-            "h2_count": len(h2s),
-            "h3_count": len(h3s),
-            "image_count": len(images),
-            "images_missing_alt": len(missing_alt),
-            "internal_link_count": len(internal_links),
-            "external_link_count": len(external_links),
-            "cta_external_leaks": cta_external_leaks,
-            "semantic_keywords": semantic_kws,
-            "score": normalized,
-            "max_score": 100,
-            "grade": "A" if normalized >= 85 else "B" if normalized >= 70 else "C" if normalized >= 55 else "D" if normalized >= 40 else "F",
-            "issues": issues,
-            "warnings": warnings,
-        }
