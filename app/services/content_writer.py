@@ -356,6 +356,17 @@ Respond in this exact format:
             except Exception:
                 pass
 
+        # Auto-inject Learning Agent lessons (from past audits & user feedback)
+        # Works even when writing outside the full pipeline (e.g. direct Generate)
+        if db and shop_domain:
+            try:
+                from app.agents.learning_agent import LearningAgent
+                lessons_ctx = LearningAgent().get_lessons_context(shop_domain, db)
+                if lessons_ctx:
+                    kb_context = (kb_context or "") + lessons_ctx
+            except Exception:
+                pass
+
         # Fetch live product data from Shopify (always fresh — never from local cache)
         products = []
         if db and shop_domain:

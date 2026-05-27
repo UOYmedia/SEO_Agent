@@ -194,7 +194,12 @@ async def auto_fix_post(
         check_store_scope(user, post.shop_domain, "write", db)
 
     # 1. Audit current state
-    audit = SeoAuditor().audit_post(post)
+    auditor = SeoAuditor()
+    audit   = auditor.audit_post(post)
+
+    # Persist issues to KB so Learning Agent learns from them
+    auditor.save_to_kb(audit, post.shop_domain, db)
+
     if not audit["issues"] and not audit.get("cta_external_leaks"):
         return {"message": "No issues found — post is already optimised.", "audit": audit, "changed": False}
 
@@ -240,7 +245,14 @@ async def auto_fix_post(
     db.refresh(post)
 
     # 6. Re-audit to show improvement
-    new_audit = SeoAuditor().audit_post(post)
+    new_audit = auditor.audit_post(post)
+
+    # Trigger Learning Agent to synthesize fresh lessons from the updated KB
+    try:
+        from app.agents.learning_agent import LearningAgent
+        await LearningAgent().synthesize_lessons(post.shop_domain, db)
+    except Exception:
+        pass  # non-critical; lessons will be synthesized on next pipeline run
 
     return {
         "changed": True,
