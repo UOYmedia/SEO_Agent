@@ -13,27 +13,11 @@ from app.config import settings
 from app.models.blog_post import BlogPost, PostStatus
 
 
-_ARTICLE_CREATE = """
-mutation ArticleCreate($article: ArticleCreateInput!) {
-  articleCreate(article: $article) {
-    article {
-      id handle onlineStoreUrl
-      image { url altText }
-    }
-    userErrors { field message }
-  }
-}
-"""
-
-_ARTICLE_UPDATE = """
-mutation ArticleUpdate($id: ID!, $article: ArticleUpdateInput!) {
-  articleUpdate(id: $id, article: $article) {
-    article {
-      id handle onlineStoreUrl
-      image { url altText }
-    }
-    userErrors { field message }
-  }
+_ARTICLE_FIELDS = """
+article {
+  id
+  handle
+  image { url altText }
 }
 userErrors { field message }
 """
