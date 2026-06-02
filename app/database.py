@@ -112,23 +112,37 @@ def _migrate_columns():
 
 
 def _backfill_shop_domain(conn):
-    """Derive shop_domain from platform_url for rows added before scoping."""
-    from urllib.parse import urlparse
-
+    """Derive shop_domain from platform_url for rows added before scoping.
+    Uses a single bulk UPDATE so startup stays under the healthcheck window."""
     tables = set(inspect(conn).get_table_names())  # type: ignore[arg-type]
     if "blog_posts" not in tables or "blog_channels" not in tables:
         return
 
-    rows = conn.execute(text(
-        "SELECT id, platform_url FROM blog_posts "
-        "WHERE shop_domain IS NULL AND platform_url IS NOT NULL"
-    )).fetchall()
-    for row in rows:
-        host = urlparse(row[1]).hostname
-        if host:
+    dialect = conn.engine.dialect.name
+
+    if dialect == "postgresql":
+        conn.execute(text(
+            "UPDATE blog_posts "
+            "SET shop_domain = substring(platform_url FROM 'https?://([^/]+)') "
+            "WHERE shop_domain IS NULL AND platform_url IS NOT NULL"
+        ))
+    else:
+        # SQLite has no regex; do it in Python but in a single executemany
+        from urllib.parse import urlparse
+
+        rows = conn.execute(text(
+            "SELECT id, platform_url FROM blog_posts "
+            "WHERE shop_domain IS NULL AND platform_url IS NOT NULL"
+        )).fetchall()
+        updates = [
+            {"h": host, "i": row[0]}
+            for row in rows
+            if (host := urlparse(row[1]).hostname)
+        ]
+        if updates:
             conn.execute(
                 text("UPDATE blog_posts SET shop_domain = :h WHERE id = :i"),
-                {"h": host, "i": row[0]},
+                updates,
             )
 
     conn.execute(text(
