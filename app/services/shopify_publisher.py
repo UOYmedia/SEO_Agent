@@ -35,6 +35,23 @@ mutation ArticleUpdate($id: ID!, $article: ArticleUpdateInput!) {
     userErrors { field message }
   }
 }
+userErrors { field message }
+"""
+
+_ARTICLE_CREATE = f"""
+mutation ArticleCreate($article: ArticleCreateInput!) {{
+  articleCreate(article: $article) {{
+    {_ARTICLE_FIELDS}
+  }}
+}}
+"""
+
+_ARTICLE_UPDATE = f"""
+mutation ArticleUpdate($id: ID!, $article: ArticleUpdateInput!) {{
+  articleUpdate(id: $id, article: $article) {{
+    {_ARTICLE_FIELDS}
+  }}
+}}
 """
 
 
@@ -170,10 +187,7 @@ class ShopifyPublisher:
 
         post.platform_id = numeric_id
         post.shop_domain = self.shop_domain
-        post.platform_url = (
-            shopify_article.get("onlineStoreUrl")
-            or f"https://{self.shop_domain}/blogs/{blog_handle}/{handle}"
-        )
+        post.platform_url = f"https://{self.shop_domain}/blogs/{blog_handle}/{handle}"
         post.status = PostStatus.PUBLISHED
         post.published_at = datetime.utcnow()
 
