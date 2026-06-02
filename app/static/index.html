@@ -66,8 +66,25 @@ label { display: block; font-size: 13px; font-weight: 500; color: rgb(55 65 81);
 .table-row:hover td { background: rgb(249 250 251); }
 .action-btns { opacity: 0; transition: opacity .15s; }
 .table-row:hover .action-btns { opacity: 1; }
+/* Quill WYSIWYG editor overrides */
+.ql-toolbar.ql-snow { border-radius: 8px 8px 0 0; border-color: rgb(209 213 219); background: rgb(249 250 251); padding: 6px 8px; flex-wrap: wrap; }
+.ql-container.ql-snow { border-radius: 0 0 8px 8px; border-color: rgb(209 213 219); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; }
+.ql-editor { min-height: 300px; max-height: 480px; overflow-y: auto; line-height: 1.7; }
+.ql-editor h1 { font-size: 1.6em; font-weight: 700; margin: .75em 0 .4em; }
+.ql-editor h2 { font-size: 1.3em; font-weight: 600; margin: .7em 0 .35em; }
+.ql-editor h3 { font-size: 1.1em; font-weight: 600; margin: .6em 0 .3em; }
+.ql-editor p  { margin: 0 0 .6em; }
+.ql-editor ul, .ql-editor ol { padding-left: 1.4em; margin: .4em 0 .8em; }
+.ql-editor a  { color: rgb(79 70 229); text-decoration: underline; }
+.ql-editor blockquote { border-left: 3px solid rgb(209 213 219); margin: .6em 0; padding-left: .8em; color: rgb(107 114 128); }
+.ql-snow .ql-toolbar button:hover, .ql-snow .ql-toolbar button.ql-active { color: rgb(79 70 229); }
+.ql-snow .ql-toolbar .ql-stroke { stroke: currentColor; }
+.ql-snow .ql-toolbar .ql-fill  { fill:   currentColor; }
+.ed-tab-btn { padding: 5px 14px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; background: transparent; color: rgb(107 114 128); transition: all .15s; }
+.ed-tab-btn.active { background: rgb(79 70 229); color: white; border-radius: 6px; }
 </style>
-</head>
+<link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
 <body class="bg-gray-100 h-screen flex overflow-hidden">
 
 <!-- ── Sidebar ─────────────────────────────────────────────── -->
@@ -92,7 +109,10 @@ label { display: block; font-size: 13px; font-weight: 500; color: rgb(55 65 81);
     <a class="nav-link" data-page="topics"    onclick="nav('topics')">🗂 Topic Clusters</a>
     <a class="nav-link" data-page="generate"  onclick="nav('generate')">✍️ Generate Article</a>
     <a class="nav-link" data-page="audit"     onclick="nav('audit')">📈 SEO Audit</a>
+    <a class="nav-link" data-page="trends"    onclick="nav('trends')">📊 Market Trends</a>
+    <a class="nav-link" data-page="pipeline"  onclick="nav('pipeline')">🤖 AI Pipeline</a>
     <a class="nav-link hidden" id="kb-nav-link" data-page="knowledge" onclick="nav('knowledge')">🧠 Knowledge Base</a>
+    <a class="nav-link" data-page="products"  onclick="nav('products')">🛍 Products KB</a>
     <a class="nav-link" data-page="brand"     onclick="nav('brand')">🎨 Brand Profile</a>
     <div id="admin-nav" class="hidden">
       <div class="border-t border-indigo-900 my-2"></div>
@@ -229,6 +249,8 @@ function openModal(title, bodyHtml, footerHtml = '') {
 }
 function closeModal() {
   document.getElementById('modal-bg').classList.add('hidden')
+  // Destroy Quill instance to avoid memory leaks
+  if (_quill) { _quill = null }
 }
 
 // ═══════════════════════════ NAV ═════════════════════════════
@@ -236,9 +258,9 @@ function nav(page) {
   S.page = page
   document.querySelectorAll('.nav-link').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page))
-  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', knowledge: 'Knowledge Base', users: 'User Management', brand: 'Brand Profile' }
+  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', trends: 'Market Trends', pipeline: '🤖 AI Pipeline', knowledge: 'Knowledge Base', users: 'User Management', brand: 'Brand Profile', products: 'Products KB' }
   document.getElementById('page-title').textContent = titles[page] || page
-  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, knowledge: renderKnowledge, users: renderUsers, brand: renderBrand }
+  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, trends: renderTrends, pipeline: renderPipeline, knowledge: renderKnowledge, users: renderUsers, brand: renderBrand, products: renderProducts }
   pages[page]?.()
 }
 
@@ -269,10 +291,37 @@ async function renderDashboard() {
 
   document.getElementById('content').innerHTML = `
     <div id="shopify-status-bar" class="mb-4"></div>
-    <div class="grid grid-cols-4 gap-4 mb-5" id="stat-cards">${skeletons(4,'h-24')}</div>
-    <div class="card">
-      <div class="text-sm font-semibold text-gray-700 mb-3">Recent Posts</div>
-      <div id="recent-posts">${skeletons(5)}</div>
+    <!-- Stat row: posts + GSC metrics -->
+    <div class="grid grid-cols-3 gap-4 mb-4" id="stat-cards">${skeletons(3,'h-24')}</div>
+    <!-- GSC Traffic Chart -->
+    <div class="card mb-4" id="dash-gsc-panel">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h2 class="font-semibold text-gray-800">📈 SEO Traffic — Google Search Console</h2>
+          <p class="text-xs text-gray-400 mt-0.5" id="dash-gsc-subtitle">Loading…</p>
+        </div>
+        <div class="flex gap-1.5" id="dash-gsc-days"></div>
+      </div>
+      <div id="dash-gsc-body">
+        <div class="flex justify-center py-10"><div class="spinner-dark"></div></div>
+      </div>
+    </div>
+    <!-- Bottom row: recent posts + quick wins -->
+    <div class="grid grid-cols-2 gap-4">
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold text-gray-700">Recent Posts</div>
+          <a class="text-xs text-indigo-500 cursor-pointer hover:underline" onclick="nav('posts')">View all →</a>
+        </div>
+        <div id="recent-posts">${skeletons(5)}</div>
+      </div>
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold text-gray-700">⚡ Quick Win Keywords</div>
+          <a class="text-xs text-indigo-500 cursor-pointer hover:underline" onclick="nav('audit')">Full audit →</a>
+        </div>
+        <div id="dash-quick-wins">${skeletons(5)}</div>
+      </div>
     </div>`
 
   // Load Shopify connection status (admin sees all stores, member sees only their accessible ones)
@@ -303,24 +352,23 @@ async function renderDashboard() {
     }
   } catch(e) {}
 
+  // Load post stats + recent posts
   try {
     const sp = S.currentShop ? `&shop_domain=${encodeURIComponent(S.currentShop)}` : ''
     const [postsResp, clusters] = await Promise.all([
       GET(`/api/v1/blogs/?limit=10&page=1${sp}`),
       GET('/api/v1/topics/?limit=100'),
     ])
-    const posts = postsResp.items || []
-    const totalPosts = postsResp.total ?? posts.length
+    const posts = (postsResp && postsResp.items) ? postsResp.items : (Array.isArray(postsResp) ? postsResp : [])
     const published = posts.filter(p => p.status === 'published').length
     const drafts    = posts.filter(p => p.status === 'draft').length
 
     document.getElementById('stat-cards').innerHTML = [
-      { icon: '📝', label: 'Total Posts',     value: totalPosts,       color: 'indigo' },
-      { icon: '✅', label: 'Published',        value: published,        color: 'green'  },
-      { icon: '📋', label: 'Drafts',           value: drafts,           color: 'yellow' },
-      { icon: '🗂', label: 'Topic Clusters',   value: clusters.length,  color: 'purple' },
+      { icon: '✅', label: 'Published',      value: published,       onclick: "nav('posts')" },
+      { icon: '📋', label: 'Drafts',         value: drafts,          onclick: "nav('posts')" },
+      { icon: '🗂',  label: 'Topic Clusters', value: clusters.length, onclick: "nav('topics')" },
     ].map(s => `
-      <div class="card flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow" onclick="nav('posts')">
+      <div class="card flex items-center gap-4 cursor-pointer hover:shadow-md transition-shadow" onclick="${s.onclick}">
         <div class="text-3xl">${s.icon}</div>
         <div>
           <div class="text-2xl font-bold text-gray-800">${s.value}</div>
@@ -329,24 +377,202 @@ async function renderDashboard() {
       </div>`).join('')
 
     document.getElementById('recent-posts').innerHTML = posts.length === 0
-      ? `<div class="text-sm text-gray-400 py-6 text-center">No posts yet. Sync Shopify or generate an article.</div>`
+      ? `<div class="text-sm text-gray-400 py-6 text-center">No posts yet.</div>`
       : `<table class="w-full text-sm">
-          <thead><tr class="text-left text-gray-400 border-b text-xs uppercase">
-            <th class="pb-2 font-medium">Title</th>
-            <th class="pb-2 font-medium">Keyword</th>
-            <th class="pb-2 font-medium">Status</th>
-            <th class="pb-2 font-medium">Source</th>
-          </tr></thead>
-          <tbody>${posts.map(p => `
+          <tbody>${posts.slice(0,8).map(p => `
             <tr class="border-b border-gray-50 table-row cursor-pointer" onclick="nav('posts')">
-              <td class="py-2 font-medium text-gray-800 max-w-xs"><div class="truncate">${esc(p.title)}</div></td>
-              <td class="py-2 text-gray-500 max-w-[130px]"><div class="truncate">${esc(p.focus_keyword||'—')}</div></td>
+              <td class="py-2 pr-2 font-medium text-gray-800 max-w-[180px]"><div class="truncate">${esc(p.title)}</div></td>
+              <td class="py-2 pr-2 text-gray-400 text-xs max-w-[110px]"><div class="truncate">${esc(p.focus_keyword||'—')}</div></td>
               <td class="py-2">${statusBadge(p.status)}</td>
-              <td class="py-2">${sourceBadge(p.source)}</td>
             </tr>`).join('')}
           </tbody>
         </table>`
   } catch(e) { toast('Load failed: ' + e.message, 'error') }
+
+  // Load GSC section
+  loadDashGsc()
+}
+
+// ─── Pure-SVG line chart (no external library) ────────────────
+function drawSvgChart(container, sparkline, days) {
+  const W = container.clientWidth || 700
+  const H = 220
+  const PAD = { top: 24, right: 56, bottom: 32, left: 48 }
+  const pw = W - PAD.left - PAD.right
+  const ph = H - PAD.top  - PAD.bottom
+
+  const clicks = sparkline.map(r => r.clicks)
+  const impr   = sparkline.map(r => r.impressions)
+  const maxClk = Math.max(...clicks, 1)
+  const maxImp = Math.max(...impr,   1)
+  const n      = sparkline.length
+
+  const xPos = i => PAD.left + (i / (n - 1)) * pw
+  const yClk = v  => PAD.top  + ph - (v / maxClk) * ph
+  const yImp = v  => PAD.top  + ph - (v / maxImp) * ph
+
+  const polyline = (pts, clr, dash='') =>
+    `<polyline points="${pts}" fill="none" stroke="${clr}" stroke-width="2"
+       stroke-dasharray="${dash}" stroke-linecap="round" stroke-linejoin="round"/>`
+
+  const ptsClk = sparkline.map((r,i) => `${xPos(i)},${yClk(r.clicks)}`).join(' ')
+  const ptsImp = sparkline.map((r,i) => `${xPos(i)},${yImp(r.impressions)}`).join(' ')
+
+  // Fill area under clicks line
+  const fillPath = `M${xPos(0)},${PAD.top + ph} ` +
+    sparkline.map((r,i) => `L${xPos(i)},${yClk(r.clicks)}`).join(' ') +
+    ` L${xPos(n-1)},${PAD.top+ph} Z`
+
+  // X-axis labels: show ~6 evenly spaced dates
+  const step  = Math.max(1, Math.floor(n / 6))
+  const xLabels = sparkline.map((r, i) => {
+    if (i % step !== 0 && i !== n - 1) return ''
+    const label = r.date.slice(5)  // MM-DD
+    return `<text x="${xPos(i)}" y="${H - 6}" text-anchor="middle"
+      font-size="9" fill="#9ca3af">${label}</text>`
+  }).join('')
+
+  // Y-axis labels (clicks, left)
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => {
+    const val = Math.round(maxClk * t)
+    const y   = yClk(val)
+    return `<text x="${PAD.left - 4}" y="${y + 3}" text-anchor="end"
+      font-size="9" fill="#9ca3af">${val >= 1000 ? (val/1000).toFixed(1)+'k' : val}</text>
+      <line x1="${PAD.left}" y1="${y}" x2="${PAD.left + pw}" y2="${y}"
+        stroke="#f3f4f6" stroke-width="1"/>`
+  }).join('')
+
+  // Y-axis labels (impressions, right)
+  const yTicksR = [0, 0.5, 1].map(t => {
+    const val = Math.round(maxImp * t)
+    const y   = yImp(val)
+    return `<text x="${PAD.left + pw + 4}" y="${y + 3}" text-anchor="start"
+      font-size="9" fill="#d1d5db">${val >= 1000 ? (val/1000).toFixed(1)+'k' : val}</text>`
+  }).join('')
+
+  // Hover dots (invisible, become visible on hover via CSS)
+  const hoverDots = sparkline.map((r, i) => {
+    const tip = `${r.date}: ${r.clicks} clicks / ${r.impressions} impr`
+    return `<circle cx="${xPos(i)}" cy="${yClk(r.clicks)}" r="4"
+      fill="#6366f1" stroke="white" stroke-width="1.5"
+      class="chart-dot" opacity="${days <= 14 ? 1 : 0}">
+      <title>${tip}</title></circle>`
+  }).join('')
+
+  // Legend
+  const legend = `
+    <rect x="${PAD.left}" y="4" width="12" height="3" rx="1" fill="#6366f1"/>
+    <text x="${PAD.left + 16}" y="10" font-size="10" fill="#6b7280">Clicks</text>
+    <line x1="${PAD.left + 66}" y1="5.5" x2="${PAD.left + 78}" y2="5.5"
+      stroke="#d1d5db" stroke-width="2" stroke-dasharray="3,2"/>
+    <text x="${PAD.left + 82}" y="10" font-size="10" fill="#6b7280">Impressions</text>`
+
+  container.innerHTML = `<style>.chart-dot{cursor:pointer;transition:opacity .1s}
+    .chart-dot:hover{opacity:1!important;r:5}</style>
+    <svg width="100%" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg"
+         style="overflow:visible;display:block">
+      ${yTicks}
+      ${yTicksR}
+      <path d="${fillPath}" fill="rgba(99,102,241,0.07)"/>
+      ${polyline(ptsImp, '#d1d5db', '5,3')}
+      ${polyline(ptsClk, '#6366f1')}
+      ${hoverDots}
+      ${xLabels}
+      ${legend}
+    </svg>`
+}
+
+async function loadDashGsc(days) {
+  if (days !== undefined) S.gscDays = days
+  const d    = S.gscDays || 28
+  const shop = S.currentShop || ''
+  const sp   = shop ? `&shop_domain=${encodeURIComponent(shop)}` : ''
+
+  // Day-range toggle buttons
+  const dayEl = document.getElementById('dash-gsc-days')
+  if (dayEl) dayEl.innerHTML = [7, 28, 90].map(n =>
+    `<button onclick="loadDashGsc(${n})"
+      class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors
+             ${d===n ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}">${n}d</button>`
+  ).join('')
+
+  const body = document.getElementById('dash-gsc-body')
+  if (!body) return
+
+  // Check GSC connected
+  let gscOk = false
+  try {
+    const status = await GET(`/api/v1/audit/gsc/status${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
+    gscOk = status.configured
+  } catch(e) {}
+
+  if (!gscOk) {
+    const sub = document.getElementById('dash-gsc-subtitle')
+    if (sub) sub.textContent = 'Not connected'
+    body.innerHTML = `
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-5 flex items-center justify-between">
+        <div>
+          <div class="font-medium text-amber-800 mb-1">Google Search Console not connected</div>
+          <div class="text-xs text-amber-600">Connect GSC to see daily SEO traffic and keyword opportunities.</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="nav('brand')">🔗 Connect GSC</button>
+      </div>`
+    const qwEl = document.getElementById('dash-quick-wins')
+    if (qwEl) qwEl.innerHTML = `<div class="text-xs text-gray-400 py-6 text-center">Connect GSC to see keyword opportunities.</div>`
+    return
+  }
+
+  body.innerHTML = '<div class="flex justify-center py-8"><div class="spinner-dark"></div></div>'
+
+  try {
+    const [sparkline, overview, opps] = await Promise.all([
+      GET(`/api/v1/audit/gsc/sparkline?days=${d}${sp}`),
+      GET(`/api/v1/audit/gsc/overview?days=${d}${sp}`),
+      GET(`/api/v1/audit/gsc/opportunities?days=${d}${sp}`),
+    ])
+
+    // Subtitle: summary numbers
+    const sub = document.getElementById('dash-gsc-subtitle')
+    if (sub) sub.innerHTML =
+      `<span class="text-green-600 font-semibold">${(overview.clicks||0).toLocaleString()} clicks</span>
+       &nbsp;·&nbsp; ${(overview.impressions||0).toLocaleString()} impressions
+       &nbsp;·&nbsp; CTR <strong>${overview.ctr||0}%</strong>
+       &nbsp;·&nbsp; Avg pos <strong>${overview.position||'—'}</strong>
+       &nbsp;·&nbsp; last ${d} days`
+
+    // Draw SVG chart
+    if (!sparkline.length) {
+      body.innerHTML = `<div class="text-xs text-gray-400 py-8 text-center">No GSC data for this period.</div>`
+    } else {
+      body.innerHTML = `<div id="dash-svg-chart" style="width:100%;min-height:220px"></div>`
+      drawSvgChart(document.getElementById('dash-svg-chart'), sparkline, d)
+    }
+
+    // Quick wins table
+    const qwEl = document.getElementById('dash-quick-wins')
+    if (qwEl) {
+      const wins = opps.filter(o => o.potential === 'quick_win').slice(0, 8)
+      qwEl.innerHTML = wins.length === 0
+        ? `<div class="text-xs text-gray-400 py-6 text-center">No quick win opportunities found.</div>`
+        : `<table class="w-full text-xs">
+            <thead><tr class="text-gray-400 border-b text-left">
+              <th class="pb-2 font-medium">Query</th>
+              <th class="pb-2 font-medium text-right">Pos</th>
+              <th class="pb-2 font-medium text-right">Impr</th>
+            </tr></thead>
+            <tbody>${wins.map(w => `
+              <tr class="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
+                  onclick="S.auditTab='gsc';nav('audit')" title="${esc(w.page||'')}">
+                <td class="py-1.5 pr-2"><div class="truncate max-w-[160px] font-medium text-gray-700">${esc(w.query)}</div></td>
+                <td class="py-1.5 text-right ${w.position<=10?'text-green-600 font-bold':'text-yellow-600'}">#${w.position.toFixed(1)}</td>
+                <td class="py-1.5 text-right text-gray-500">${w.impressions.toLocaleString()}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>`
+    }
+  } catch(e) {
+    body.innerHTML = `<div class="text-xs text-red-500 py-4 text-center">Error: ${esc(e.message)}</div>`
+  }
 }
 
 async function syncShopify() {
@@ -370,9 +596,17 @@ async function renderPosts() {
   document.getElementById('header-actions').innerHTML =
     `<button class="btn btn-primary btn-sm" onclick="nav('generate')">✍️ New Article</button>`
 
+  const shopBadge = S.currentShop
+    ? `<div class="text-xs text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 flex items-center gap-1.5">
+         🏪 <span class="font-medium">${esc(S.currentShop)}</span>
+         <a class="text-gray-400 hover:text-gray-600 cursor-pointer ml-1" onclick="selectShop('');loadPosts()" title="Show all stores">✕</a>
+       </div>`
+    : `<div class="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">⚠️ All stores — select a store to filter</div>`
+
   document.getElementById('content').innerHTML = `
     <div class="card mb-4">
-      <div class="flex gap-3">
+      ${shopBadge}
+      <div class="flex gap-3 mt-3">
         <input type="text" id="ps-search" placeholder="Search title or keyword…" value="${esc(S.postsSearch)}"
           style="flex:1" onkeyup="if(event.key==='Enter'){S.postsSearch=this.value;S.postsPage=1;loadPosts()}">
         <select id="ps-source" style="width:150px" onchange="S.postsSource=this.value;S.postsPage=1;loadPosts()">
@@ -430,25 +664,30 @@ async function loadPosts() {
           <th class="pb-3 font-medium w-36">Keyword</th>
           <th class="pb-3 font-medium w-24">Status</th>
           <th class="pb-3 font-medium w-24">Source</th>
+          <th class="pb-3 font-medium w-28">Updated</th>
           <th class="pb-3 font-medium w-32">Actions</th>
         </tr></thead>
         <tbody>${posts.map(p => `
           <tr class="border-b border-gray-50 table-row">
             <td class="py-3 pr-3">
               <div class="font-medium text-gray-800 truncate max-w-xs">${esc(p.title)}</div>
-              ${p.platform_url
-                ? `<a href="${esc(p.platform_url)}" target="_blank" class="text-xs text-indigo-500 hover:underline">View on store ↗</a>`
-                : `<span class="text-xs text-gray-300">Not published</span>`}
+              ${p.scheduled_at
+                ? `<span class="text-xs text-amber-600">🕐 Scheduled: ${fmtDate(p.scheduled_at)}</span>`
+                : p.platform_url
+                  ? `<a href="${esc(p.platform_url)}" target="_blank" class="text-xs text-indigo-500 hover:underline">View on store ↗</a>`
+                  : `<span class="text-xs text-gray-300">Not published</span>`}
             </td>
             <td class="py-3 pr-3 text-gray-500 truncate max-w-[144px]">${esc(p.focus_keyword||'—')}</td>
             <td class="py-3 pr-3">${statusBadge(p.status)}</td>
             <td class="py-3 pr-3">${sourceBadge(p.source)}</td>
+            <td class="py-3 pr-3 text-xs text-gray-400 whitespace-nowrap">${p.updated_at ? fmtDate(p.updated_at) : '—'}</td>
             <td class="py-3">
-              <div class="action-btns flex gap-1">
+              <div class="action-btns flex gap-1 flex-wrap">
                 <button class="btn btn-secondary btn-sm" onclick="viewPost(${p.id})">View</button>
-                ${p.status==='draft'
-                  ? `<button class="btn btn-success btn-sm" onclick="openPublishModal(${p.id},'${esc(p.title)}')">Publish</button>`
-                  : ''}
+                ${p.status==='draft' ? `
+                  <button class="btn btn-success btn-sm" onclick="openPublishModal(${p.id},'${esc(p.title)}')">Publish</button>
+                  <button class="btn btn-secondary btn-sm" onclick="openScheduleModal(${p.id},'${esc(p.title)}',${JSON.stringify(p.shop_domain||'')},${JSON.stringify(p.scheduled_at||null)})">🕐 Schedule</button>
+                ` : ''}
               </div>
             </td>
           </tr>`).join('')}
@@ -549,6 +788,7 @@ function _renderViewPost(id, p) {
   document.getElementById('modal-footer').innerHTML = `
     ${p.status === 'draft' ? `
       <button class="btn btn-success btn-sm" onclick="closeModal();openPublishModal(${id},'${esc(p.title)}')">🚀 Publish to Shopify</button>
+      <button class="btn btn-secondary btn-sm" onclick="viewPostAuditFix(${id})">📊 Audit & Fix</button>
       <button class="btn btn-secondary btn-sm" onclick="editPost(${id})">📝 Edit</button>
       <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5" onclick="confirmDeletePost(${id})">🗑 Delete</button>
     ` : ''}
@@ -556,8 +796,64 @@ function _renderViewPost(id, p) {
 }
 
 // ─────────────────── Edit draft ──────────────────────────────
+// ─────────────────── WYSIWYG Editor (Quill) ───────────────────
+let _quill = null
+
+function edInitQuill(html) {
+  const host = document.getElementById('ed-quill-host')
+  if (!host) return
+  _quill = new Quill(host, {
+    theme: 'snow',
+    modules: {
+      toolbar: [
+        [{ header: [1, 2, 3, 4, false] }],
+        ['bold', 'italic', 'underline', 'strike'],
+        [{ list: 'ordered' }, { list: 'bullet' }],
+        ['link', 'blockquote'],
+        [{ align: [] }],
+        ['clean'],
+      ],
+    },
+  })
+  if (html) _quill.clipboard.dangerouslyPasteHTML(html)
+}
+
+function edSwitchTab(tab) {
+  const visualWrap = document.getElementById('ed-visual-wrap')
+  const htmlWrap   = document.getElementById('ed-html-wrap')
+  const tabVisual  = document.getElementById('ed-tab-visual')
+  const tabHtml    = document.getElementById('ed-tab-html')
+  const textarea   = document.getElementById('ed-content')
+
+  if (tab === 'html') {
+    // Sync Quill → textarea then show textarea
+    if (_quill) textarea.value = _quill.root.innerHTML
+    visualWrap.classList.add('hidden')
+    htmlWrap.classList.remove('hidden')
+    tabHtml.classList.add('active'); tabVisual.classList.remove('active')
+  } else {
+    // Sync textarea → Quill then show Quill
+    if (_quill && textarea) _quill.clipboard.dangerouslyPasteHTML(textarea.value || '')
+    htmlWrap.classList.add('hidden')
+    visualWrap.classList.remove('hidden')
+    tabVisual.classList.add('active'); tabHtml.classList.remove('active')
+    // Re-focus Quill
+    setTimeout(() => _quill?.focus(), 50)
+  }
+}
+
+function edGetContent() {
+  // If HTML tab is visible, return textarea; otherwise Quill
+  const htmlWrap = document.getElementById('ed-html-wrap')
+  if (htmlWrap && !htmlWrap.classList.contains('hidden')) {
+    return document.getElementById('ed-content')?.value || ''
+  }
+  return _quill ? _quill.root.innerHTML : ''
+}
+
 async function editPost(id) {
-  const p = await GET(`/api/v1/generate/article/${id}/content`).catch(e => { toast(e.message,'error'); return null })
+  openModal('Edit Draft', `<div class="flex items-center justify-center py-12"><div class="spinner-dark"></div></div>`)
+  const p = await GET(`/api/v1/generate/article/${id}/content`).catch(e => { toast(e.message,'error'); closeModal(); return null })
   if (!p) return
   document.getElementById('modal-title').textContent = 'Edit Draft'
   document.getElementById('modal-body').innerHTML = `
@@ -580,13 +876,29 @@ async function editPost(id) {
       </div>
       <div id="image-section">${renderFeaturedImage(id, p, true)}</div>
       <div>
-        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Content HTML</label>
-        <textarea id="ed-content" rows="14" class="mt-1" style="font-family:monospace;font-size:12px">${esc(p.content_html||'')}</textarea>
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Content</label>
+          <div class="flex items-center gap-0.5 bg-gray-100 p-0.5 rounded-lg">
+            <button id="ed-tab-visual" class="ed-tab-btn active" onclick="edSwitchTab('visual')">🖊 Visual</button>
+            <button id="ed-tab-html"   class="ed-tab-btn"        onclick="edSwitchTab('html')">&lt;/&gt; HTML</button>
+          </div>
+        </div>
+        <!-- Visual (Quill) editor -->
+        <div id="ed-visual-wrap">
+          <div id="ed-quill-host"></div>
+        </div>
+        <!-- HTML source editor -->
+        <div id="ed-html-wrap" class="hidden">
+          <textarea id="ed-content" rows="18" style="font-family:'JetBrains Mono',Menlo,monospace;font-size:12px;border-radius:8px;resize:vertical"></textarea>
+        </div>
       </div>
     </div>`
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn btn-primary btn-sm" id="ed-save-btn" onclick="savePost(${id})">💾 Save Changes</button>
     <button class="btn btn-secondary btn-sm" onclick="viewPost(${id})">Cancel</button>`
+
+  // Init Quill after DOM is painted
+  requestAnimationFrame(() => edInitQuill(p.content_html || ''))
 }
 
 async function savePost(id) {
@@ -600,11 +912,11 @@ async function savePost(id) {
       seo_title:       document.getElementById('ed-seo-title').value.trim(),
       seo_description: document.getElementById('ed-meta').value.trim(),
       tags,
-      content_html:    document.getElementById('ed-content').value,
+      content_html:    edGetContent(),
     })
     toast('✅ Draft saved', 'success')
-    viewPost(id)          // return to view mode with fresh data
-    renderPosts()         // refresh list in background
+    viewPost(id)
+    renderPosts()
   } catch(e) {
     toast('Save failed: ' + e.message, 'error')
     btn.disabled = false; btn.textContent = '💾 Save Changes'
@@ -823,20 +1135,241 @@ async function doRegenerateImage(postId) {
 }
 
 // ─────────────────── Publish modal ────────────────────────────
+// ─────────────────── Inline Audit & Fix (view post modal) ─────
+async function viewPostAuditFix(postId) {
+  // Show audit section below the preview iframe
+  const auditSec = document.getElementById('vp-audit-section')
+  if (auditSec) { auditSec.scrollIntoView({behavior:'smooth'}); return }
+
+  // Inject the panel under the iframe
+  const previewDiv = document.querySelector('#preview-frame')?.parentElement
+  if (!previewDiv) return
+
+  const panel = document.createElement('div')
+  panel.id = 'vp-audit-section'
+  panel.className = 'mt-4 border-t pt-4'
+  panel.innerHTML = `
+    <div class="flex items-center justify-between mb-2">
+      <div class="text-sm font-semibold text-gray-700">📊 SEO Audit</div>
+      <div id="vp-audit-loading" class="text-xs text-gray-400 flex items-center gap-1"><span class="spinner-dark" style="width:14px;height:14px;border-width:2px"></span> Auditing…</div>
+    </div>
+    <div id="vp-audit-result"></div>`
+  previewDiv.after(panel)
+  panel.scrollIntoView({behavior:'smooth'})
+
+  // Run audit
+  try {
+    const audit = await GET(`/api/v1/audit/pre-publish/${postId}`)
+    document.getElementById('vp-audit-loading').remove()
+
+    const gradeColor = g => ({A:'text-green-600 bg-green-50 border-green-200',B:'text-blue-600 bg-blue-50 border-blue-200',C:'text-yellow-600 bg-yellow-50 border-yellow-200',D:'text-orange-600 bg-orange-50 border-orange-200',F:'text-red-600 bg-red-50 border-red-200'})[g]||'text-gray-600 bg-gray-50 border-gray-200'
+
+    const hasIssues = !audit.ready_to_publish || (audit.issues?.length || 0) > 0
+
+    document.getElementById('vp-audit-result').innerHTML = `
+      <div id="vp-audit-card" class="border rounded-xl p-3 space-y-2 ${audit.ready_to_publish ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-semibold ${audit.ready_to_publish ? 'text-green-700' : 'text-amber-700'}">
+            ${audit.ready_to_publish ? '✅ Article passed audit' : '⚠️ Issues found'}
+          </span>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold border rounded-lg px-2 py-0.5 ${gradeColor(audit.grade)}">${audit.grade} · ${audit.score}/${audit.max_score}</span>
+            <span class="text-xs text-gray-400">${audit.word_count?.toLocaleString()} words</span>
+          </div>
+        </div>
+        ${audit.issues?.length ? `
+          <div class="space-y-1">
+            ${audit.issues.map(i=>`<div class="text-xs text-red-700 flex gap-1.5"><span>✗</span><span>${esc(i)}</span></div>`).join('')}
+          </div>` : ''}
+        ${audit.warnings?.length ? `
+          <div class="space-y-1">
+            ${audit.warnings.map(w=>`<div class="text-xs text-amber-700 flex gap-1.5"><span>⚠</span><span>${esc(w)}</span></div>`).join('')}
+          </div>` : ''}
+        <div class="flex items-center justify-between pt-1 gap-3">
+          <div class="flex gap-3 text-xs text-gray-500">
+            <span>H2: <strong>${audit.h2_count ?? '—'}</strong></span>
+            <span>🔗 Int: <strong>${audit.internal_link_count ?? '—'}</strong></span>
+            <span>🌐 Ext: <strong>${audit.external_link_count ?? '—'}</strong></span>
+          </div>
+          ${hasIssues ? `<button id="vp-fix-btn" class="btn btn-primary btn-sm shrink-0" onclick="viewPostFix(${postId})">🔧 AI Fix Issues</button>` : ''}
+        </div>
+      </div>`
+  } catch(e) {
+    document.getElementById('vp-audit-loading').textContent = 'Audit failed: ' + e.message
+  }
+}
+
+async function viewPostFix(postId) {
+  const fixBtn  = document.getElementById('vp-fix-btn')
+  const card    = document.getElementById('vp-audit-card')
+  if (!fixBtn || !card) return
+
+  fixBtn.disabled = true
+  fixBtn.innerHTML = '<span class="spinner"></span> Fixing…'
+
+  try {
+    const r = await POST(`/api/v1/audit/posts/${postId}/fix`, {})
+
+    if (!r.changed) {
+      card.innerHTML = `<div class="text-sm text-green-700 font-medium">✅ No issues — already optimised.</div>`
+      return
+    }
+
+    const gradeColor = g => ({A:'text-green-600 bg-green-50 border-green-200',B:'text-blue-600 bg-blue-50 border-blue-200',C:'text-yellow-600 bg-yellow-50 border-yellow-200',D:'text-orange-600 bg-orange-50 border-orange-200',F:'text-red-600 bg-red-50 border-red-200'})[g]||'text-gray-600'
+    const remaining = r.after.issues || []
+    const fixed = (r.before.issues||[]).filter(i=>!remaining.includes(i))
+
+    card.className = `border rounded-xl p-3 space-y-2 ${remaining.length===0 ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`
+    card.innerHTML = `
+      <div class="flex items-center justify-between">
+        <span class="text-sm font-semibold ${remaining.length===0 ? 'text-green-700' : 'text-amber-700'}">
+          ${remaining.length===0 ? '✅ All issues fixed!' : '⚠️ Partially fixed'}
+        </span>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-400 line-through">${r.before.grade} · ${r.before.score}</span>
+          <span class="text-xs">→</span>
+          <span class="text-xs font-bold border rounded-lg px-2 py-0.5 ${gradeColor(r.after.grade)}">${r.after.grade} · ${r.after.score}</span>
+        </div>
+      </div>
+      ${fixed.length ? `<div class="space-y-1">${fixed.map(i=>`<div class="text-xs text-green-700 flex gap-1.5"><span>✓</span><span>${esc(i)}</span></div>`).join('')}</div>` : ''}
+      ${remaining.length ? `
+        <div class="space-y-1">${remaining.map(i=>`<div class="text-xs text-amber-700 flex gap-1.5"><span>⚠</span><span>${esc(i)}</span></div>`).join('')}</div>
+        <button id="vp-fix-btn" class="btn btn-primary btn-sm" onclick="viewPostFix(${postId})">🔧 Fix Remaining</button>` : ''}
+      <div class="pt-1 flex gap-2">
+        <button class="btn btn-sm btn-secondary" onclick="viewPost(${postId})">↻ Reload Preview</button>
+      </div>`
+
+    toast('✅ Content fixed!', 'success')
+  } catch(e) {
+    fixBtn.disabled = false
+    fixBtn.innerHTML = '🔧 AI Fix Issues'
+    toast('Fix failed: ' + e.message, 'error')
+  }
+}
+
+// ─────────────────── AI Fix before publish ─────────────────────
+async function publishFix(postId) {
+  const fixBtn   = document.getElementById('pub-fix-btn')
+  const auditDiv = document.getElementById('pub-audit-block')
+  if (!fixBtn || !auditDiv) return
+
+  fixBtn.disabled = true
+  fixBtn.innerHTML = '<span class="spinner"></span> Fixing…'
+
+  try {
+    const r = await POST(`/api/v1/audit/posts/${postId}/fix`, {})
+
+    if (!r.changed) {
+      auditDiv.innerHTML = `
+        <div class="border border-green-200 bg-green-50 rounded-xl p-4 text-sm text-green-700 font-medium">
+          ✅ No issues found — article is already optimised.
+        </div>`
+      return
+    }
+
+    const gradeColor = g => ({A:'text-green-600 bg-green-50 border-green-200',B:'text-blue-600 bg-blue-50 border-blue-200',C:'text-yellow-600 bg-yellow-50 border-yellow-200',D:'text-orange-600 bg-orange-50 border-orange-200',F:'text-red-600 bg-red-50 border-red-200'})[g]||'text-gray-600'
+    const remaining = r.after.issues || []
+    const fixed = (r.before.issues || []).filter(i => !(r.after.issues||[]).includes(i))
+
+    auditDiv.innerHTML = `
+      <div class="border rounded-xl p-4 space-y-2 ${remaining.length === 0 ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-semibold ${remaining.length === 0 ? 'text-green-700' : 'text-amber-700'}">
+            ${remaining.length === 0 ? '✅ All issues fixed!' : '⚠️ Partially fixed — some issues remain'}
+          </span>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-400 line-through">${r.before.grade} · ${r.before.score}</span>
+            <span class="text-xs text-gray-400">→</span>
+            <span class="text-xs font-bold border rounded-lg px-2 py-0.5 ${gradeColor(r.after.grade)}">${r.after.grade} · ${r.after.score}</span>
+          </div>
+        </div>
+        ${fixed.length ? `
+          <div class="space-y-1">
+            ${fixed.map(i=>`<div class="text-xs text-green-700 flex gap-1.5"><span>✓</span><span>${esc(i)}</span></div>`).join('')}
+          </div>` : ''}
+        ${remaining.length ? `
+          <div class="space-y-1">
+            ${remaining.map(i=>`<div class="text-xs text-amber-700 flex gap-1.5"><span>⚠</span><span>${esc(i)}</span></div>`).join('')}
+          </div>
+          <button id="pub-fix-btn" class="btn btn-primary btn-sm" onclick="publishFix(${postId})">🔧 Fix Remaining</button>` : ''}
+      </div>`
+
+    toast('✅ Content fixed!', 'success')
+  } catch(e) {
+    fixBtn.disabled = false
+    fixBtn.innerHTML = '🔧 AI Fix Issues'
+    toast('Fix failed: ' + e.message, 'error')
+  }
+}
+
 async function openPublishModal(postId, title) {
+  // Step 1: show audit loading screen immediately
+  openModal(`Publish: ${esc(title)}`,
+    `<div class="flex flex-col items-center justify-center py-10 gap-3">
+       <div class="spinner-dark"></div>
+       <div class="text-sm text-gray-500">Running pre-publish audit…</div>
+     </div>`,
+    `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>`)
+
+  // Fetch audit + post info in parallel
+  let audit = null, hasImage = false
+  try {
+    const [a, p] = await Promise.all([
+      GET(`/api/v1/audit/pre-publish/${postId}`),
+      GET(`/api/v1/generate/article/${postId}/content`).catch(() => ({})),
+    ])
+    audit = a
+    hasImage = !!p.featured_image_url
+  } catch(e) {
+    audit = null
+  }
+
+  // Step 2: render audit results + publish form together
   const chOpts = S.channels.map(c =>
     `<option value="${esc(c.platform_id)}">${esc(c.title)} (ID: ${c.platform_id})</option>`).join('')
   const savedBlogId = localStorage.getItem(`seo_pref_blogid_${S.currentShop}`) || ''
 
-  // Check if the draft already has a featured image
-  let hasImage = false
-  try {
-    const p = await GET(`/api/v1/generate/article/${postId}/content`)
-    hasImage = !!p.featured_image_url
-  } catch {}
+  const gradeColor = g => ({A:'text-green-600 bg-green-50 border-green-200', B:'text-blue-600 bg-blue-50 border-blue-200', C:'text-yellow-600 bg-yellow-50 border-yellow-200', D:'text-orange-600 bg-orange-50 border-orange-200', F:'text-red-600 bg-red-50 border-red-200'})[g] || 'text-gray-600 bg-gray-50 border-gray-200'
 
-  openModal(`Publish: ${title}`, `
+  const auditBlock = audit ? `
+    <div id="pub-audit-block" class="border rounded-xl p-4 space-y-2 ${audit.ready_to_publish ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}">
+      <div class="flex items-center justify-between">
+        <div class="text-sm font-semibold ${audit.ready_to_publish ? 'text-green-700' : 'text-amber-700'}">
+          ${audit.ready_to_publish ? '✅ Article passed audit' : '⚠️ Audit issues found'}
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-bold border rounded-lg px-2 py-0.5 ${gradeColor(audit.grade)}">${audit.grade} · ${audit.score}/${audit.max_score}</span>
+          <span class="text-xs text-gray-400">${audit.word_count?.toLocaleString()} words</span>
+        </div>
+      </div>
+      ${audit.issues?.length ? `
+        <div class="space-y-1">
+          ${audit.issues.map(i => `<div class="text-xs text-red-700 flex gap-1.5"><span>✗</span><span>${esc(i)}</span></div>`).join('')}
+        </div>` : ''}
+      ${audit.warnings?.length ? `
+        <div class="space-y-1">
+          ${audit.warnings.map(w => `<div class="text-xs text-amber-700 flex gap-1.5"><span>⚠</span><span>${esc(w)}</span></div>`).join('')}
+        </div>` : ''}
+      ${(() => { const sk = typeof audit.semantic_keywords === 'string' ? JSON.parse(audit.semantic_keywords || '[]') : (audit.semantic_keywords || []); return sk.length ? `
+        <div class="text-xs text-gray-500 pt-1 border-t border-current border-opacity-20">
+          <span class="font-medium">Semantic keywords:</span> ${sk.map(k => `<span class="inline-block bg-white border rounded px-1 mr-1 mb-1">${esc(k)}</span>`).join('')}
+        </div>` : ''; })()}
+      <div class="flex items-center justify-between pt-1 gap-3">
+        <div class="flex gap-4 text-xs text-gray-500">
+          <span>🔗 Internal: <strong>${audit.internal_link_count ?? '—'}</strong></span>
+          <span>🌐 External: <strong>${audit.external_link_count ?? '—'}</strong></span>
+          <span>H2: <strong>${audit.h2_count ?? '—'}</strong></span>
+        </div>
+        ${!audit.ready_to_publish ? `
+          <button id="pub-fix-btn" class="btn btn-primary btn-sm shrink-0" onclick="publishFix(${postId})">
+            🔧 AI Fix Issues
+          </button>` : ''}
+      </div>
+    </div>` : `<div class="text-xs text-gray-400 bg-gray-50 rounded-lg p-3">Audit unavailable — check audit scope permissions.</div>`
+
+  document.getElementById('modal-body').innerHTML = `
     <div class="space-y-4">
+      ${auditBlock}
       <div>
         <label>Shopify Blog ID <span class="text-red-500">*</span></label>
         <input type="number" id="pub-blog-id" placeholder="e.g. 12345678" value="${savedBlogId}">
@@ -849,17 +1382,17 @@ async function openPublishModal(postId, title) {
         <input type="text" id="pub-author" value="${esc(S.user?.name || 'SEO Agent')}">
       </div>
       <div class="flex items-center gap-2 text-xs ${hasImage ? 'text-green-700 bg-green-50 border-green-200' : 'text-amber-700 bg-amber-50 border-amber-200'} border rounded-lg px-3 py-2">
-        ${hasImage
-          ? '🖼 Featured image is set — will be uploaded to Shopify.'
-          : '⚠️ No featured image set. The article will publish without one. Add an image in the draft view first.'}
+        ${hasImage ? '🖼 Featured image is set — will be uploaded to Shopify.' : '⚠️ No featured image. Add one in draft view before publishing.'}
       </div>
       <div class="flex items-center gap-3 py-1">
         <input type="checkbox" id="pub-live" checked class="w-4 h-4 rounded accent-indigo-600">
         <label for="pub-live" class="!mb-0 cursor-pointer">Publish immediately (uncheck = save as Shopify draft)</label>
       </div>
-    </div>`,
+    </div>`
+
+  document.getElementById('modal-footer').innerHTML =
     `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
-     <button class="btn btn-primary btn-sm" id="do-pub-btn" onclick="doPublish(${postId})">🚀 Publish</button>`)
+     <button class="btn btn-primary btn-sm" id="do-pub-btn" onclick="doPublish(${postId})">🚀 Publish</button>`
 }
 
 async function doPublish(postId) {
@@ -886,6 +1419,88 @@ async function doPublish(postId) {
     btn.disabled = false
     btn.innerHTML = '🚀 Publish'
   }
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return isNaN(d) ? iso : d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return isNaN(d) ? iso : d.toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+}
+
+function openScheduleModal(postId, title, shopDomain, scheduledAt) {
+  const chOpts = S.channels.map(c =>
+    `<option value="${esc(c.platform_id)}">${esc(c.title)}</option>`).join('')
+  const savedBlogId = localStorage.getItem(`seo_pref_blogid_${S.currentShop}`) || ''
+
+  // Default to tomorrow at 09:00 local time
+  const now = new Date()
+  now.setDate(now.getDate() + 1)
+  now.setHours(9, 0, 0, 0)
+  const defaultDt = now.toISOString().slice(0, 16)
+  const currentDt = scheduledAt ? new Date(scheduledAt).toISOString().slice(0, 16) : defaultDt
+
+  openModal(`Schedule: ${title}`, `
+    <div class="space-y-4">
+      <div>
+        <label>Publish at (UTC)</label>
+        <input type="datetime-local" id="sched-dt" value="${currentDt}">
+        <div class="text-xs text-gray-400 mt-1">Server time is UTC. Add your timezone offset accordingly.</div>
+      </div>
+      <div>
+        <label>Blog channel</label>
+        <select id="sched-blog-id">
+          <option value="${savedBlogId}">${savedBlogId ? 'Last used: '+savedBlogId : '— Select blog —'}</option>
+          ${chOpts}
+        </select>
+      </div>
+      ${scheduledAt ? `
+        <div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Currently scheduled: ${fmtDateTime(scheduledAt)}
+          <button class="ml-2 text-red-500 underline" onclick="cancelSchedule(${postId})">Cancel schedule</button>
+        </div>` : ''}
+    </div>`,
+    `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
+     <button class="btn btn-primary btn-sm" id="do-sched-btn" onclick="doSchedule(${postId})">🕐 Save Schedule</button>`)
+}
+
+async function doSchedule(postId) {
+  const dt = document.getElementById('sched-dt').value
+  const blogId = parseInt(document.getElementById('sched-blog-id').value)
+  if (!dt) { toast('Pick a date/time', 'error'); return }
+  if (!blogId) { toast('Select a blog channel', 'error'); return }
+
+  const btn = document.getElementById('do-sched-btn')
+  btn.disabled = true; btn.innerHTML = `<span class="spinner"></span>`
+
+  try {
+    await POST(`/api/v1/publish/${postId}/schedule`, {
+      scheduled_at: new Date(dt).toISOString(),
+      shop_domain: S.currentShop || '',
+      blog_id: blogId,
+    })
+    localStorage.setItem(`seo_pref_blogid_${S.currentShop}`, blogId)
+    closeModal()
+    toast(`✅ Scheduled for ${fmtDateTime(dt+'Z')}`, 'success')
+    if (S.page === 'posts') loadPosts()
+  } catch(e) {
+    toast('Schedule failed: ' + e.message, 'error')
+    btn.disabled = false; btn.innerHTML = '🕐 Save Schedule'
+  }
+}
+
+async function cancelSchedule(postId) {
+  try {
+    await DEL(`/api/v1/publish/${postId}/schedule`)
+    closeModal()
+    toast('Schedule cancelled — post is back to draft.', 'success')
+    if (S.page === 'posts') loadPosts()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
 }
 
 // ═══════════════════ KEYWORD RESEARCH ════════════════════════
@@ -978,6 +1593,7 @@ function renderResearchResults(r) {
     <div class="flex gap-2">
       <button class="btn btn-secondary btn-sm" onclick="useResearchForGenerate()">✍️ Use for Generate →</button>
       <button class="btn btn-secondary btn-sm" onclick="useResearchForTopics()">🗂 Plan Topic Cluster →</button>
+      ${r.keyword ? `<button class="btn btn-secondary btn-sm" onclick="followKeyword('${esc(r.keyword)}','research')">📌 Follow Keyword</button>` : ''}
     </div>
     ${r.note ? `<div class="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 p-3 rounded-lg">⚠️ ${esc(r.note)}</div>` : ''}`
 }
@@ -1089,17 +1705,134 @@ async function loadClusterList() {
     el.innerHTML = list.length === 0
       ? '<div class="text-sm text-gray-400 py-4">No clusters yet.</div>'
       : list.map(c => `
-          <div class="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
-            <div>
+          <div class="flex items-center justify-between py-3 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50 rounded-lg px-2 -mx-2 transition" onclick="openCluster(${c.id})">
+            <div class="min-w-0">
               <div class="text-sm font-medium text-gray-800">${esc(c.cluster_name||c.seed_keyword)}</div>
-              <div class="text-xs text-gray-400">${esc(c.seed_keyword)} · #${c.id}</div>
+              <div class="text-xs text-gray-400">${esc(c.seed_keyword)} · #${c.id} · ${fmtDate(c.created_at)}</div>
             </div>
-            <span class="badge badge-gray text-xs">${esc(c.status)}</span>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="badge badge-gray text-xs">${esc(c.status)}</span>
+              <span class="text-xs text-indigo-500">Open →</span>
+            </div>
           </div>`).join('')
   } catch(e) {
     const el = document.getElementById('tp-list')
     if (el) el.innerHTML = `<div class="text-sm text-red-400">Failed: ${esc(e.message)}</div>`
   }
+}
+
+async function openCluster(id) {
+  const resultEl = document.getElementById('tp-result')
+  if (resultEl) resultEl.innerHTML = `<div class="card mb-4 text-center text-gray-400 py-6"><div class="spinner mx-auto mb-2"></div>Loading cluster…</div>`
+  try {
+    const c = await GET(`/api/v1/topics/${id}`)
+    S.topicPlan = c
+    renderTopicPlanResult(c)
+    loadClusterKeywords(id)
+    window.scrollTo({top: 0, behavior: 'smooth'})
+  } catch(e) {
+    if (resultEl) resultEl.innerHTML = `<div class="card mb-4 text-red-400 text-sm">Failed to load cluster: ${esc(e.message)}</div>`
+  }
+}
+
+async function loadClusterKeywords(clusterId) {
+  try {
+    const kws = await GET(`/api/v1/topics/${clusterId}/keywords`)
+    renderClusterKeywords(clusterId, kws)
+  } catch(e) {
+    // keyword panel optional
+  }
+}
+
+function renderClusterKeywords(clusterId, kws) {
+  const resultEl = document.getElementById('tp-result')
+  if (!resultEl) return
+  const existing = document.getElementById('tp-kw-panel')
+  if (existing) existing.remove()
+
+  const rankBadge = (cur, prev) => {
+    if (cur == null) return '<span class="text-gray-300">—</span>'
+    const delta = prev != null ? prev - cur : 0
+    const arrow = delta > 0 ? `<span class="text-green-500 text-xs">↑${delta}</span>` : delta < 0 ? `<span class="text-red-400 text-xs">↓${Math.abs(delta)}</span>` : ''
+    return `<strong>#${cur}</strong> ${arrow}`
+  }
+
+  const panel = document.createElement('div')
+  panel.id = 'tp-kw-panel'
+  panel.className = 'card mt-4'
+  panel.innerHTML = `
+    <div class="flex items-center justify-between mb-3">
+      <div class="text-sm font-semibold text-gray-700">🔍 Tracked Keywords (${kws.length})</div>
+      ${kws.length > 0 ? `<button class="btn btn-secondary btn-sm" onclick="refreshClusterVolume(${clusterId})">📊 Refresh Volume</button>` : ''}
+    </div>
+    ${kws.length === 0
+      ? '<div class="text-xs text-gray-400 mb-3">No keywords tracked yet.</div>'
+      : `<table class="w-full text-sm mb-3">
+          <thead><tr class="text-left text-gray-400 text-xs border-b">
+            <th class="pb-2">Keyword</th>
+            <th class="pb-2 w-20">Rank</th>
+            <th class="pb-2 w-24">Vol/mo</th>
+            <th class="pb-2 w-16">CPC</th>
+            <th class="pb-2 w-16"></th>
+          </tr></thead>
+          <tbody>${kws.map(k => `
+            <tr class="border-b border-gray-50">
+              <td class="py-2 text-gray-800">${esc(k.keyword)}</td>
+              <td class="py-2">${rankBadge(k.current_rank, k.prev_rank)}</td>
+              <td class="py-2 text-gray-600">${k.volume != null ? '<strong>'+k.volume.toLocaleString()+'</strong>' : '<span class="text-gray-300">—</span>'}</td>
+              <td class="py-2 text-gray-400 text-xs">${k.cpc != null ? '$'+k.cpc.toFixed(2) : '<span class="text-gray-300">—</span>'}</td>
+              <td class="py-2 text-right">
+                <button class="text-red-400 hover:text-red-600 text-xs" onclick="removeClusterKeyword(${clusterId},${k.id})">✕</button>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`}
+    <div class="flex gap-2 mt-1">
+      <input type="text" id="tp-kw-input" placeholder="Add keyword to track…" style="flex:1" onkeyup="if(event.key==='Enter')addClusterKeyword(${clusterId})">
+      <button class="btn btn-secondary btn-sm" onclick="addClusterKeyword(${clusterId})">+ Track</button>
+    </div>`
+  resultEl.appendChild(panel)
+}
+
+async function addClusterKeyword(clusterId) {
+  const inp = document.getElementById('tp-kw-input')
+  const kw = inp?.value.trim()
+  if (!kw) return
+  try {
+    await POST(`/api/v1/topics/${clusterId}/keywords`, { keyword: kw, country: 'vn', language: 'vi' })
+    inp.value = ''
+    loadClusterKeywords(clusterId)
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function removeClusterKeyword(clusterId, kwId) {
+  try {
+    await DEL(`/api/v1/topics/${clusterId}/keywords/${kwId}`)
+    loadClusterKeywords(clusterId)
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function refreshClusterVolume(clusterId) {
+  try {
+    const kws = await GET(`/api/v1/topics/${clusterId}/keywords`)
+    const keywords = kws.map(k => k.keyword)
+    if (!keywords.length) return
+    const res = await POST('/api/v1/audit/volume', { keywords })
+    if (!res.configured) {
+      toast('Set DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD to enable search volume', 'error')
+      return
+    }
+    // Update each keyword via PATCH with new volume data
+    await Promise.all(kws.map(async k => {
+      const v = res.results[k.keyword]
+      if (v) await api('PATCH', `/api/v1/topics/${clusterId}/keywords/${k.id}`, {
+        volume: v.volume, cpc: v.cpc,
+        difficulty: v.competition != null ? Math.round(v.competition * 100) : null,
+      })
+    }))
+    toast('Search volume updated', 'success')
+    loadClusterKeywords(clusterId)
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
 }
 
 function prefillGenerate(key) {
@@ -1213,7 +1946,18 @@ async function renderGenerate() {
               <label>Word Count</label>
               <input type="number" id="gen-words" value="1500" min="800" max="5000">
             </div>
-            <div class="col-span-2">
+            <div>
+              <label>🎯 SEO Platform</label>
+              <select id="gen-platform">
+                <option value="google">🔍 Google Search</option>
+                <option value="amazon">📦 Amazon / Marketplace</option>
+                <option value="etsy">🛍️ Etsy</option>
+                <option value="tiktok">🎵 TikTok Shop</option>
+                <option value="bing">🪟 Bing / Microsoft</option>
+                <option value="youtube">▶️ YouTube</option>
+              </select>
+            </div>
+            <div>
               <label>Blog Channel</label>
               <select id="gen-channel">
                 <option value="">— None —</option>
@@ -1245,8 +1989,15 @@ async function renderGenerate() {
                  : ''}`}
         </div>
 
+        <div class="flex items-center gap-3 py-1 mb-2">
+          <input type="checkbox" id="gen-use-pipeline" class="w-4 h-4 rounded accent-indigo-600">
+          <label for="gen-use-pipeline" class="!mb-0 cursor-pointer text-sm">
+            <span class="font-medium">🤖 Use Full AI Pipeline</span>
+            <span class="text-xs text-gray-400 ml-1">(Research → Copywrite → Audit → Learning)</span>
+          </label>
+        </div>
         <button id="gen-btn" class="btn btn-primary w-full" style="width:100%;justify-content:center" onclick="doGenerate()">
-          ✍️ Generate Article with GPT-4o
+          ✍️ Generate Article
         </button>
       </div>
 
@@ -1364,6 +2115,7 @@ async function doGenerate() {
   const title   = document.getElementById('gen-title').value.trim()
   const keyword = document.getElementById('gen-kw').value.trim()
   const outline = outlineItems.filter(s => s.trim())
+  const usePipeline = document.getElementById('gen-use-pipeline')?.checked
 
   if (!title)          { toast('Enter article title', 'error'); return }
   if (!keyword)        { toast('Enter focus keyword', 'error'); return }
@@ -1371,13 +2123,68 @@ async function doGenerate() {
 
   const btn = document.getElementById('gen-btn')
   btn.disabled = true
-  btn.innerHTML = `<span class="spinner"></span> Generating article + image…`
 
+  // ── Full Pipeline mode ──
+  if (usePipeline) {
+    btn.innerHTML = `<span class="spinner"></span> Running AI Pipeline (Research → Copywrite → Audit)…`
+    document.getElementById('gen-result').innerHTML = `
+      <div class="card flex items-center justify-center text-center" style="min-height:300px">
+        <div>
+          <div class="spinner-dark mx-auto mb-4"></div>
+          <div class="text-sm text-gray-600 font-medium">🤖 AI Pipeline running…</div>
+          <div class="text-xs text-gray-400 mt-1">Research → Learning → Copywrite → Audit · Takes 60–120 seconds</div>
+        </div>
+      </div>`
+    try {
+      const brandDomain = document.getElementById('gen-brand')?.value || S.selectedBrandDomain
+      const r = await POST('/api/v1/pipeline/run', {
+        title, keyword,
+        shop_domain:     brandDomain || S.currentShop || null,
+        language:        document.getElementById('gen-lang').value,
+        country:         document.getElementById('gen-market')?.value || 'us',
+        market:          document.getElementById('gen-market')?.value || 'us',
+        word_count:      parseInt(document.getElementById('gen-words').value),
+        tone:            document.getElementById('gen-tone').value,
+        target_platform: document.getElementById('gen-platform')?.value || 'google',
+        article_type:    document.getElementById('gen-type')?.value || null,
+        notes:           document.getElementById('gen-notes')?.value?.trim() || null,
+        outline,
+        max_audit_iterations: 2,
+      })
+      // Show pipeline result in gen-result panel
+      document.getElementById('gen-result').innerHTML = `
+        <div class="card space-y-3">
+          <div class="flex items-center gap-2">
+            <span class="text-green-600 font-semibold text-sm">✅ Pipeline complete</span>
+            <span class="text-xs text-gray-400">Run #${r.run_id} · ${r.lessons_applied||0} lessons applied</span>
+          </div>
+          ${r.audit ? `<div class="flex gap-3">
+            <span class="text-xs font-bold border rounded-lg px-2 py-0.5 ${r.audit.grade==='A'?'text-green-600 bg-green-50 border-green-200':r.audit.grade==='B'?'text-blue-600 bg-blue-50 border-blue-200':'text-amber-600 bg-amber-50 border-amber-200'}">${r.audit.grade} · ${r.audit.score}/100</span>
+            <span class="text-xs text-gray-500">${r.audit.ready ? '✅ Ready to publish' : '⚠️ Review recommended'}</span>
+          </div>` : ''}
+          ${r.article?.id ? `<div class="flex gap-2 pt-2">
+            <button class="btn btn-primary btn-sm" onclick="openPublishModal(${r.article.id},'${esc(r.article.title||'')}')">🚀 Publish</button>
+            <button class="btn btn-secondary btn-sm" onclick="nav('pipeline')">📊 Full Details</button>
+          </div>` : ''}
+        </div>`
+      toast('✅ Pipeline complete!', 'success')
+    } catch(e) {
+      document.getElementById('gen-result').innerHTML =
+        `<div class="card"><div class="text-red-500 text-sm">Pipeline error: ${esc(e.message)}</div></div>`
+      toast('Pipeline failed: ' + e.message, 'error')
+    } finally {
+      btn.disabled = false; btn.innerHTML = '✍️ Generate Article'
+    }
+    return
+  }
+
+  // ── Quick Generate mode (existing logic) ──
+  btn.innerHTML = `<span class="spinner"></span> Generating article + image…`
   document.getElementById('gen-result').innerHTML = `
     <div class="card flex items-center justify-center text-center" style="min-height:300px">
       <div>
         <div class="spinner-dark mx-auto mb-4"></div>
-        <div class="text-sm text-gray-600 font-medium">GPT-4o is writing your article + generating image…</div>
+        <div class="text-sm text-gray-600 font-medium">Writing your article + generating image…</div>
         <div class="text-xs text-gray-400 mt-1">Typically 40–60 seconds</div>
       </div>
     </div>`
@@ -1385,7 +2192,6 @@ async function doGenerate() {
   try {
     const channelId = document.getElementById('gen-channel').value
     const brandDomain = document.getElementById('gen-brand')?.value || S.selectedBrandDomain
-    // Remember channel selection per shop
     if (channelId && S.currentShop) localStorage.setItem(`seo_pref_channel_${S.currentShop}`, channelId)
     const r = await POST('/api/v1/generate/article', {
       title, focus_keyword: keyword, outline,
@@ -1395,6 +2201,7 @@ async function doGenerate() {
       word_count:      parseInt(document.getElementById('gen-words').value),
       notes:           document.getElementById('gen-notes')?.value?.trim() || null,
       article_type:    document.getElementById('gen-type')?.value || null,
+      target_platform: document.getElementById('gen-platform')?.value || 'google',
       blog_channel_id: channelId ? parseInt(channelId) : null,
       shop_domain:     brandDomain || S.currentShop || null,
     })
@@ -1407,7 +2214,7 @@ async function doGenerate() {
     toast('Generation failed: ' + e.message, 'error')
   } finally {
     btn.disabled = false
-    btn.innerHTML = '✍️ Generate Article with GPT-4o'
+    btn.innerHTML = '✍️ Generate Article'
   }
 }
 
@@ -1540,6 +2347,7 @@ function renderAudit() {
     { id:'plan', label:'🎯 Ranking Plan' },
     { id:'gsc', label:'📊 Search Console' },
     { id:'suggest', label:'✨ Keyword Ideas' },
+    { id:'tracking', label:'📌 Keyword Tracking' },
   ]
   const tabBar = tabs.map(t =>
     `<button onclick="S.auditTab='${t.id}';renderAudit()"
@@ -1551,6 +2359,7 @@ function renderAudit() {
   else if (S.auditTab === 'rankings') body = renderAuditRankingsTab()
   else if (S.auditTab === 'plan') body = renderAuditPlanTab()
   else if (S.auditTab === 'gsc') body = renderGscTab()
+  else if (S.auditTab === 'tracking') body = renderTrackingTab()
   else body = renderSuggestTab()
 
   document.getElementById('content').innerHTML = `
@@ -1564,6 +2373,7 @@ function renderAudit() {
   if (S.auditTab === 'plan' && S.planResult) renderPlanResult(S.planResult)
   if (S.auditTab === 'gsc') initGscTab()
   if (S.auditTab === 'suggest' && S.suggestionResult) renderSuggestions(S.suggestionResult)
+  if (S.auditTab === 'tracking') initTrackingTab()
 }
 
 function renderAuditBlogTab() {
@@ -1633,9 +2443,17 @@ function renderAuditBlogResults(results) {
             </tr>
             <tr id="audit-expand-${i}" class="hidden bg-gray-50">
               <td colspan="6" class="px-4 py-3">
-                <div class="space-y-1">
+                <div class="space-y-1 mb-3">
                   ${r.issues.length ? r.issues.map(issue => `<div class="text-xs text-amber-700 bg-amber-50 rounded px-3 py-1.5">⚠ ${esc(issue)}</div>`).join('') : '<div class="text-xs text-green-700 bg-green-50 rounded px-3 py-1.5">✅ Post looks good!</div>'}
+                  ${r.warnings?.length ? r.warnings.map(w => `<div class="text-xs text-gray-500 bg-gray-50 rounded px-3 py-1.5">💡 ${esc(w)}</div>`).join('') : ''}
                 </div>
+                <div class="flex gap-2 items-center flex-wrap" id="audit-fix-bar-${i}">
+                  ${r.issues.length || r.cta_external_leaks?.length ? `
+                    <button class="btn btn-primary btn-sm" onclick="auditAutoFix(${r.post_id},${i})">🔧 Auto-Fix Issues</button>
+                  ` : ''}
+                  <button class="btn btn-secondary btn-sm" onclick="viewPost(${r.post_id})">📝 Open Post</button>
+                </div>
+                <div id="audit-fix-result-${i}" class="mt-2"></div>
               </td>
             </tr>`).join('')}
         </tbody>
@@ -1649,13 +2467,52 @@ function toggleAuditRow(i) {
   if (el) el.classList.toggle('hidden')
 }
 
+async function auditAutoFix(postId, rowIdx) {
+  const bar = document.getElementById(`audit-fix-bar-${rowIdx}`)
+  const res = document.getElementById(`audit-fix-result-${rowIdx}`)
+  if (!bar || !res) return
+  bar.innerHTML = `<span class="spinner-dark"></span><span class="text-xs text-gray-500 ml-2">AI is fixing SEO issues… this may take 30–60s</span>`
+  res.innerHTML = ''
+  try {
+    const r = await POST(`/api/v1/audit/posts/${postId}/fix`, {})
+    if (!r.changed) {
+      bar.innerHTML = `<div class="text-xs text-green-700 bg-green-50 rounded px-3 py-1.5">✅ ${esc(r.message)}</div>`
+      return
+    }
+    const scoreDelta = r.after.score - r.before.score
+    const deltaStr = scoreDelta >= 0 ? `+${scoreDelta}` : `${scoreDelta}`
+    const deltaColor = scoreDelta > 0 ? 'text-green-600' : 'text-gray-500'
+    bar.innerHTML = `
+      <button class="btn btn-secondary btn-sm" onclick="viewPost(${postId})">📝 Review Fixed Post</button>
+      <button class="btn btn-success btn-sm" onclick="openPublishModal(${postId},'')">🚀 Publish</button>`
+    res.innerHTML = `
+      <div class="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg text-xs">
+        <div class="font-semibold text-green-800 mb-1">✅ Auto-fix complete — saved as draft</div>
+        <div class="flex gap-4">
+          <span class="text-gray-500">Before: <strong>${r.before.score}/100</strong> (${r.before.grade})</span>
+          <span class="${deltaColor}">After: <strong>${r.after.score}/100</strong> (${r.after.grade}) <strong>${deltaStr} pts</strong></span>
+        </div>
+        ${r.after.issues.length ? `<div class="mt-1 text-amber-700">Remaining: ${r.after.issues.map(x=>esc(x)).join(' · ')}</div>` : '<div class="mt-1 text-green-700">No remaining issues 🎉</div>'}
+      </div>`
+    toast('🔧 Auto-fix complete — post saved as draft', 'success')
+  } catch(e) {
+    bar.innerHTML = `<button class="btn btn-primary btn-sm" onclick="auditAutoFix(${postId},${rowIdx})">🔧 Auto-Fix Issues</button>
+      <button class="btn btn-secondary btn-sm" onclick="viewPost(${postId})">📝 Open Post</button>`
+    res.innerHTML = `<div class="text-xs text-red-500 mt-1">Fix failed: ${esc(e.message)}</div>`
+  }
+}
+
 function renderAuditRankingsTab() {
   const savedKws = S.rankingKeywords || ''
   const savedShop = S.shopDomain || ''
   return `
     <div class="card">
-      <h2 class="font-semibold text-gray-800 mb-1">Keyword Rankings</h2>
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="font-semibold text-gray-800">Keyword Rankings</h2>
+        <button class="btn btn-secondary btn-sm" onclick="testDataForSeo()">🔌 Test DataForSEO</button>
+      </div>
       <p class="text-sm text-gray-500 mb-4">Check where your store ranks on Google for specific keywords</p>
+      <div id="dataforseo-status"></div>
       <div class="grid grid-cols-3 gap-4 mb-4">
         <div class="col-span-2">
           <label>Keywords (one per line)</label>
@@ -1670,6 +2527,40 @@ function renderAuditRankingsTab() {
       </div>
       <div id="ranking-results"></div>
     </div>`
+}
+
+async function testDataForSeo() {
+  const el = document.getElementById('dataforseo-status')
+  if (el) el.innerHTML = '<div class="text-xs text-gray-400 mb-3"><span class="spinner-dark" style="width:12px;height:12px;display:inline-block"></span> Testing DataForSEO connection…</div>'
+  try {
+    const r = await GET('/api/v1/audit/volume/test?keyword=seo')
+    if (!el) return
+    if (r.ok) {
+      const sample = r.sample_result
+      el.innerHTML = `
+        <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-3 text-xs space-y-1">
+          <div class="font-semibold text-green-700">✅ DataForSEO connected — ${esc(r.login_used||'')}</div>
+          <div class="text-green-600">API: ${esc(r.api_status_message||'')} · Cost per call: $${r.cost ?? '?'}</div>
+          ${sample ? `<div class="text-gray-700 bg-white rounded p-2 mt-1">
+            Sample "seo": volume <strong>${sample.search_volume?.toLocaleString() ?? '—'}</strong>
+            | competition <strong>${sample.competition_index ?? '—'}/100</strong>
+            | CPC <strong>$${sample.cpc ?? '—'}</strong>
+          </div>` : '<div class="text-gray-500">No sample data returned.</div>'}
+        </div>`
+    } else {
+      const hint = r.hint ? r.hint.split('\n').map(l => `<div>${esc(l)}</div>`).join('') : ''
+      el.innerHTML = `
+        <div class="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-xs space-y-1.5">
+          <div class="font-semibold text-red-700">✗ DataForSEO — ${esc(r.step||'error')}</div>
+          ${r.login_used ? `<div class="text-gray-500">Credentials used: <code class="bg-white px-1 rounded">${esc(r.login_used)}</code></div>` : ''}
+          <div class="text-red-700 font-medium">${esc(r.error || r.api_message || 'Unknown error')}</div>
+          ${hint ? `<div class="text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mt-1 space-y-0.5">${hint}</div>` : ''}
+        </div>`
+    }
+  } catch(e) {
+    const el2 = document.getElementById('dataforseo-status')
+    if (el2) el2.innerHTML = `<div class="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-xs text-red-700">Error: ${esc(e.message)}</div>`
+  }
 }
 
 async function runRankingCheck() {
@@ -1711,6 +2602,8 @@ function renderRankingResults(data) {
         <thead><tr class="border-b border-gray-100 text-xs text-gray-500 uppercase">
           <th class="text-left py-2 pr-4">Keyword</th>
           <th class="text-center py-2 px-3">Position</th>
+          <th class="text-right py-2 px-3">Search Vol</th>
+          <th class="text-right py-2 px-3">CPC</th>
           <th class="text-left py-2 px-3">Ranking URL</th>
         </tr></thead>
         <tbody>
@@ -1718,6 +2611,8 @@ function renderRankingResults(data) {
             <tr class="border-b border-gray-50 table-row">
               <td class="py-2.5 pr-4 font-medium text-gray-800">${esc(r.keyword)}</td>
               <td class="text-center py-2.5 px-3">${posBadge(r.position)}</td>
+              <td class="text-right py-2.5 px-3 text-gray-600">${r.volume != null ? r.volume.toLocaleString() : '<span class="text-gray-300">—</span>'}</td>
+              <td class="text-right py-2.5 px-3 text-gray-500 text-xs">${r.cpc != null ? '$'+r.cpc.toFixed(2) : '<span class="text-gray-300">—</span>'}</td>
               <td class="py-2.5 px-3 text-xs text-gray-500 max-w-xs truncate">
                 ${r.ranking_url ? `<a href="${esc(r.ranking_url)}" target="_blank" class="text-indigo-600 hover:underline truncate block">${esc(r.ranking_title||r.ranking_url)}</a>` : '—'}
               </td>
@@ -1725,10 +2620,11 @@ function renderRankingResults(data) {
         </tbody>
       </table>
     </div>
-    <div class="mt-3 flex gap-3 text-xs text-gray-400">
+    <div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-400">
       <span>Ranking: <strong class="text-green-600">${ranking.length}</strong></span>
       <span>Not ranking: <strong class="text-gray-500">${notRanking.length}</strong></span>
       ${ranking.length ? `<span>Best: <strong class="text-blue-600">#${Math.min(...ranking.map(r=>r.position))} for "${ranking.sort((a,b)=>a.position-b.position)[0].keyword}"</strong></span>` : ''}
+      ${results[0]?.volume == null ? '<span class="text-amber-500">Search volume: set DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD to enable</span>' : ''}
     </div>
     ${S.rankingResults ? `<div class="mt-4"><button class="btn btn-primary btn-sm" onclick="S.auditTab='plan';renderAudit()">🎯 Generate Ranking Plan →</button></div>` : ''}`
 }
@@ -1818,7 +2714,7 @@ function renderPlanResult(plan) {
                 <ul class="space-y-1">
                   ${(u.recommendations||[]).map(r=>`<li class="text-xs text-gray-600">• ${esc(r)}</li>`).join('')}
                 </ul>
-                ${u.post_id ? `<button class="btn btn-secondary btn-sm mt-2" onclick="S.page='posts';renderPosts()">Open Post →</button>` : ''}
+              ${u.post_id ? `<button class="btn btn-secondary btn-sm mt-2" onclick="openPostForRewrite(${u.post_id},${esc(JSON.stringify(u.recommendations||[]))})">✏️ Open &amp; Rewrite →</button>` : ''}
               </div>`).join('')}
           </div>
         </div>` : ''}
@@ -1835,21 +2731,45 @@ function renderPlanResult(plan) {
                 </div>
                 <div class="text-sm text-indigo-700 mb-1">📌 ${esc(a.suggested_title||'')}</div>
                 <div class="text-xs text-gray-600">${esc(a.reason||'')}</div>
-                <button class="btn btn-primary btn-sm mt-2" onclick="prefillGenerateKw(${JSON.stringify(esc(a.keyword))},${JSON.stringify(esc(a.suggested_title))})">✍️ Write This Article</button>
+                <button class="btn btn-primary btn-sm mt-2" onclick="prefillGenerateKw(${esc(JSON.stringify(a.keyword))},${esc(JSON.stringify(a.suggested_title))})">✍️ Write This Article</button>
               </div>`).join('')}
           </div>
         </div>` : ''}
     </div>`
 }
 
-function prefillGenerateKw(keyword, title) {
+async function prefillGenerateKw(keyword, title) {
   nav('generate')
-  setTimeout(() => {
+  // renderGenerate is async (fetches brands) — poll until fields exist
+  for (let i = 0; i < 30; i++) {
     const kw = document.getElementById('gen-kw')
     const ti = document.getElementById('gen-title')
-    if (kw) kw.value = keyword || ''
-    if (ti) ti.value = title || ''
-  }, 100)
+    if (kw && ti) {
+      kw.value = keyword || ''
+      ti.value = title || ''
+      kw.focus()
+      return
+    }
+    await new Promise(r => setTimeout(r, 100))
+  }
+}
+
+async function openPostForRewrite(postId, recommendations) {
+  // Open the post modal and pre-fill rewrite textarea with plan recommendations
+  await viewPost(postId)
+  const ta = document.getElementById('rw-instructions')
+  if (!ta) return
+  if (Array.isArray(recommendations) && recommendations.length) {
+    ta.value = recommendations.map(r => '• ' + r).join('\n')
+    ta.focus()
+    // Scroll rewrite section into view
+    const sec = document.getElementById('rewrite-section')
+    if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    // Flash highlight so user sees it was pre-filled
+    ta.style.transition = 'background 0.4s'
+    ta.style.background = '#eff6ff'
+    setTimeout(() => { ta.style.background = '' }, 1200)
+  }
 }
 
 // ════════════════════ KEYWORD SUGGESTIONS TAB ════════════════
@@ -1955,9 +2875,45 @@ async function loadGscData() {
       GET(`/api/v1/audit/gsc/queries?days=${S.gscDays}&limit=20${shopParam}`),
       GET(`/api/v1/audit/gsc/opportunities?days=${S.gscDays}${shopParam}`),
     ])
+    S.gscQueries = queries   // store for volume fetch
     renderGscData(overview, pages, queries, opps)
   } catch(e) {
     el.innerHTML = `<div class="text-red-500 text-sm p-4">Error loading GSC data: ${esc(e.message)}</div>`
+  }
+}
+
+async function fetchGscVolume() {
+  const queries = (S.gscQueries || []).map(q => q.query)
+  if (!queries.length) return
+  const btn = document.getElementById('gsc-vol-btn')
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Fetching…' }
+  try {
+    const res = await POST('/api/v1/audit/volume', { keywords: queries })
+    if (!res.configured) {
+      toast('Set DATAFORSEO_LOGIN + DATAFORSEO_PASSWORD to enable search volume', 'error')
+      return
+    }
+    // Show volume header
+    const hdr = document.getElementById('gsc-vol-header')
+    if (hdr) hdr.style.display = ''
+
+    // Update each row: append volume cell
+    const tbody = document.getElementById('gsc-queries-body')
+    if (tbody) {
+      const rows = tbody.querySelectorAll('tr')
+      rows.forEach((row, i) => {
+        const q = queries[i]
+        const v = q && res.results[q]
+        const cell = row.querySelector('td.gsc-vol-cell') || document.createElement('td')
+        cell.className = 'text-right px-2 text-gray-600 gsc-vol-cell'
+        cell.innerHTML = v?.volume != null ? v.volume.toLocaleString() : '<span class="text-gray-300">—</span>'
+        if (!row.querySelector('td.gsc-vol-cell')) row.appendChild(cell)
+      })
+    }
+    if (btn) { btn.disabled = false; btn.innerHTML = '📊 Search Volume ✓' }
+  } catch(e) {
+    toast('Volume fetch failed: ' + e.message, 'error')
+    if (btn) { btn.disabled = false; btn.innerHTML = '📊 Search Volume' }
   }
 }
 
@@ -2054,18 +3010,25 @@ function renderGscData(overview, pages, queries, opps) {
         </div>
 
         <div class="card">
-          <h3 class="font-semibold text-gray-700 mb-3">🔍 Top Queries</h3>
-          <table class="w-full text-sm">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold text-gray-700">🔍 Top Queries</h3>
+            <button class="btn btn-secondary btn-sm" id="gsc-vol-btn" onclick="fetchGscVolume()">📊 Search Volume</button>
+          </div>
+          <table class="w-full text-sm" id="gsc-queries-table">
             <thead><tr class="border-b border-gray-100 text-xs text-gray-400 uppercase">
               <th class="text-left py-1.5">Query</th>
               <th class="text-right py-1.5 px-2">Clicks</th>
               <th class="text-right py-1.5 px-2">Pos</th>
+              <th class="text-right py-1.5 px-2" id="gsc-vol-header" style="display:none">Vol/mo</th>
+              <th class="py-1.5 px-2"></th>
             </tr></thead>
-            <tbody>
+            <tbody id="gsc-queries-body">
               ${tableRows(queries, [
                 {fn: r => `<span class="text-gray-700 truncate block max-w-48">${esc(r.query)}</span>`},
                 {cls:'text-right text-gray-700 font-medium px-2', fn: r => r.clicks.toLocaleString()},
                 {cls:'text-right px-2', fn: r => posBadge(r.position)},
+                {cls:'text-right px-2 gsc-vol-cell', fn: r => `<span class="text-gray-300">—</span>`},
+                {cls:'px-2', fn: r => `<button class="btn btn-secondary btn-sm text-xs" onclick="followKeyword('${esc(r.query)}','gsc')" title="Follow this keyword">📌</button>`},
               ])}
             </tbody>
           </table>
@@ -2084,6 +3047,476 @@ function prefillRankingCheck(keyword) {
     const el = document.getElementById('ranking-keywords')
     if (el) el.value = keyword
   }, 100)
+}
+
+// ═══════════════════ MARKET TRENDS ═══════════════════════════
+
+const TREND_COUNTRIES = [
+  {v:'us',l:'🇺🇸 US'},{v:'gb',l:'🇬🇧 UK'},{v:'au',l:'🇦🇺 AU'},{v:'ca',l:'🇨🇦 CA'},
+  {v:'vn',l:'🇻🇳 VN'},{v:'sg',l:'🇸🇬 SG'},{v:'th',l:'🇹🇭 TH'},{v:'de',l:'🇩🇪 DE'},
+  {v:'fr',l:'🇫🇷 FR'},{v:'jp',l:'🇯🇵 JP'},{v:'kr',l:'🇰🇷 KR'},{v:'in',l:'🇮🇳 IN'},
+]
+const TREND_LANGS = [
+  {v:'en',l:'English'},{v:'vi',l:'Vietnamese'},{v:'de',l:'German'},
+  {v:'fr',l:'French'},{v:'ja',l:'Japanese'},{v:'ko',l:'Korean'},
+  {v:'th',l:'Thai'},{v:'id',l:'Indonesian'},
+]
+
+async function renderTrends() {
+  document.getElementById('header-actions').innerHTML = ''
+  const status = await GET('/api/v1/trends/status').catch(() => ({ configured: false }))
+
+  const countryOpts = TREND_COUNTRIES.map(c => `<option value="${c.v}">${c.l}</option>`).join('')
+  const langOpts    = TREND_LANGS.map(l => `<option value="${l.v}">${l.l}</option>`).join('')
+  const timeOpts = [
+    {v:'past_7_days',l:'Last 7 days'},{v:'past_30_days',l:'Last 30 days'},
+    {v:'past_12_months',l:'Last 12 months'},{v:'past_5_years',l:'Last 5 years'},
+  ].map(o => `<option value="${o.v}" ${o.v==='past_12_months'?'selected':''}>${o.l}</option>`).join('')
+
+  document.getElementById('content').innerHTML = `
+    <div class="space-y-4">
+      <div class="card">
+        <div class="flex items-end gap-3 flex-wrap">
+          <div style="flex:1;min-width:200px">
+            <label>Keyword</label>
+            <input type="text" id="trend-kw" placeholder="e.g. handmade jewelry, SEO tools"
+              onkeyup="if(event.key==='Enter')doTrendExplore()">
+          </div>
+          <div>
+            <label>Country</label>
+            <select id="trend-country" style="width:110px">${countryOpts}</select>
+          </div>
+          <div>
+            <label>Language</label>
+            <select id="trend-lang" style="width:120px">${langOpts}</select>
+          </div>
+          <div>
+            <label>Period</label>
+            <select id="trend-time" style="width:150px">${timeOpts}</select>
+          </div>
+          <button class="btn btn-primary" id="trend-btn" onclick="doTrendExplore()">📊 Explore Trends</button>
+        </div>
+        ${!status.configured ? `
+          <div class="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-700">
+            ⚠️ DataForSEO not configured. Set <code>DATAFORSEO_LOGIN</code> and <code>DATAFORSEO_PASSWORD</code> in your environment variables.
+          </div>` : ''}
+      </div>
+      <div id="trend-out"></div>
+    </div>`
+}
+
+async function doTrendExplore() {
+  const kw = document.getElementById('trend-kw')?.value?.trim()
+  if (!kw) { toast('Enter a keyword', 'error'); return }
+  const btn = document.getElementById('trend-btn')
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Researching…'
+  document.getElementById('trend-out').innerHTML = `
+    <div class="card"><div class="flex justify-center py-10"><div class="spinner-dark"></div></div></div>`
+
+  const country  = document.getElementById('trend-country')?.value  || 'us'
+  const language = document.getElementById('trend-lang')?.value     || 'en'
+  const timeRange = document.getElementById('trend-time')?.value    || 'past_12_months'
+
+  try {
+    const [trendData, kwData] = await Promise.allSettled([
+      POST('/api/v1/trends/explore',   { keyword: kw, country, language, time_range: timeRange }),
+      POST('/api/v1/trends/keywords',  { keyword: kw, country, language, limit: 50 }),
+    ])
+    renderTrendResults(
+      trendData.status === 'fulfilled' ? trendData.value : null,
+      kwData.status   === 'fulfilled' ? kwData.value   : null,
+      kw
+    )
+    if (trendData.status === 'rejected') toast('Trends: ' + trendData.reason?.message, 'error')
+    if (kwData.status   === 'rejected') toast('Keywords: ' + kwData.reason?.message, 'error')
+  } catch(e) {
+    document.getElementById('trend-out').innerHTML = `<div class="card text-red-500 text-sm p-4">${esc(e.message)}</div>`
+  } finally {
+    btn.disabled = false; btn.innerHTML = '📊 Explore Trends'
+  }
+}
+
+function renderTrendResults(trend, kwRes, seedKw) {
+  const el = document.getElementById('trend-out')
+  if (!el) return
+
+  // ── Trend Chart ──
+  let chartSection = ''
+  if (trend?.timeline?.length >= 2) {
+    const vals = trend.timeline.map(t => t.value)
+    const maxV = Math.max(...vals, 1)
+    const W = 800, H = 80, PAD = 4
+    const pts = vals.map((v, i) => {
+      const x = PAD + (i / (vals.length - 1)) * (W - PAD*2)
+      const y = H - PAD - (v / maxV) * (H - PAD*2)
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    }).join(' ')
+    const labels = trend.timeline.filter((_, i) => i % Math.ceil(vals.length/8) === 0)
+      .map(t => {
+        const x = PAD + (trend.timeline.indexOf(t) / (vals.length-1)) * (W - PAD*2)
+        return `<text x="${x.toFixed(1)}" y="${H+14}" text-anchor="middle" font-size="9" fill="#9ca3af">${esc(t.date.slice(0,7))}</text>`
+      }).join('')
+
+    chartSection = `
+      <div class="card">
+        <div class="flex items-center justify-between mb-2">
+          <div>
+            <h3 class="font-semibold text-gray-700">📈 Interest Over Time</h3>
+            <p class="text-xs text-gray-400 mt-0.5">Relative search interest (100 = peak) · ${esc(trend.time_range?.replace(/_/g,' ') || '')}</p>
+          </div>
+          <span class="badge badge-blue">${esc((trend.country||'').toUpperCase())}</span>
+        </div>
+        <svg viewBox="0 0 ${W} ${H+20}" class="w-full" style="height:100px">
+          <polyline points="${pts}" fill="none" stroke="rgb(79,70,229)" stroke-width="2.5" stroke-linejoin="round"/>
+          ${labels}
+        </svg>
+      </div>`
+  }
+
+  // ── Top & Rising Queries ──
+  let queriesSection = ''
+  if (trend && (trend.top_queries?.length || trend.rising_queries?.length)) {
+    const queryCard = (title, icon, items) => !items?.length ? '' : `
+      <div class="card">
+        <h3 class="font-semibold text-gray-700 mb-3">${icon} ${esc(title)}</h3>
+        <div class="space-y-1.5">
+          ${items.map((q, i) => `
+            <div class="flex items-center justify-between gap-3 py-1 border-b border-gray-50 last:border-0">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-xs font-bold text-gray-300 w-4 shrink-0">${i+1}</span>
+                <span class="text-sm text-gray-700 truncate">${esc(q.query)}</span>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <div class="w-16 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                  <div class="h-1.5 rounded-full bg-indigo-500" style="width:${Math.min(100,(q.value/Math.max(...items.map(x=>x.value),1)*100)).toFixed(0)}%"></div>
+                </div>
+                <button class="btn btn-secondary btn-sm text-xs" onclick="followKeyword('${esc(q.query)}','research')" title="Follow this keyword">📌</button>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>`
+
+    queriesSection = `
+      <div class="grid grid-cols-2 gap-4">
+        ${queryCard('Top Queries', '🔝', trend.top_queries)}
+        ${queryCard('Rising Queries', '🚀', trend.rising_queries)}
+      </div>`
+  }
+
+  // ── Keyword Ideas Table ──
+  let kwSection = ''
+  if (kwRes?.results?.length) {
+    const compColor = c => c < 30 ? 'text-green-600' : c < 70 ? 'text-yellow-600' : 'text-red-500'
+    const compLabel = c => c < 30 ? 'Low' : c < 70 ? 'Med' : 'High'
+    const volBar = v => {
+      const maxVol = Math.max(...kwRes.results.map(k => k.volume||0), 1)
+      const w = Math.round((v / maxVol) * 100)
+      return `<div class="flex items-center gap-2">
+        <div class="w-16 bg-gray-100 rounded-full h-1.5 overflow-hidden shrink-0">
+          <div class="h-1.5 rounded-full bg-indigo-400" style="width:${w}%"></div>
+        </div>
+        <span class="text-gray-700 font-medium">${(v||0).toLocaleString()}</span>
+      </div>`
+    }
+    kwSection = `
+      <div class="card">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="font-semibold text-gray-700">💡 Keyword Ideas</h3>
+            <p class="text-xs text-gray-400 mt-0.5">${kwRes.results.length} related keywords with search volume data</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="bulkFollowTrends('${esc(seedKw)}')">📌 Follow All Top 10</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="border-b border-gray-100 text-xs text-gray-400 uppercase">
+              <th class="text-left py-2 px-3">Keyword</th>
+              <th class="text-right py-2 px-3">Volume/mo</th>
+              <th class="text-center py-2 px-3">Competition</th>
+              <th class="text-right py-2 px-3">CPC</th>
+              <th class="py-2 px-3"></th>
+            </tr></thead>
+            <tbody>
+              ${kwRes.results.map(k => `
+                <tr class="border-b border-gray-50 table-row">
+                  <td class="py-2 px-3 font-medium text-gray-800">${esc(k.keyword)}</td>
+                  <td class="text-right py-2 px-3">${volBar(k.volume)}</td>
+                  <td class="text-center py-2 px-3">
+                    <span class="${compColor(k.competition)} text-xs font-medium">${compLabel(k.competition)}</span>
+                    <span class="text-gray-400 text-xs ml-1">${k.competition}</span>
+                  </td>
+                  <td class="text-right py-2 px-3 text-gray-600">$${k.cpc.toFixed(2)}</td>
+                  <td class="py-2 px-3">
+                    <div class="flex gap-1 action-btns">
+                      <button class="btn btn-secondary btn-sm" onclick="prefillRankingCheck('${esc(k.keyword)}')" title="Check rankings">→</button>
+                      <button class="btn btn-secondary btn-sm" onclick="followKeyword('${esc(k.keyword)}','research')" title="Follow">📌</button>
+                    </div>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`
+  }
+
+  if (!chartSection && !queriesSection && !kwSection) {
+    el.innerHTML = `<div class="card text-center py-10 text-gray-400">No data returned. Try a different keyword or country.</div>`
+    return
+  }
+
+  el.innerHTML = `<div class="space-y-4">${chartSection}${queriesSection}${kwSection}</div>`
+}
+
+async function bulkFollowTrends(seedKw) {
+  if (!S.currentShop) { toast('Select a store first', 'error'); return }
+  const kwRes = document.querySelectorAll('#trend-out tbody tr')
+  const keywords = Array.from(kwRes).slice(0, 10).map(tr => tr.querySelector('td')?.textContent?.trim()).filter(Boolean)
+  if (!keywords.length) return
+  try {
+    const res = await POST('/api/v1/tracking/follow/bulk', {
+      keywords, shop_domain: S.currentShop, source: 'research'
+    })
+    toast(`📌 Following ${res.followed} keywords`, 'success')
+  } catch(e) { toast('Bulk follow failed: ' + e.message, 'error') }
+}
+
+// ═══════════════════ KEYWORD TRACKING ════════════════════════
+
+async function followKeyword(keyword, source) {
+  if (!S.currentShop) { toast('Select a store first', 'error'); return }
+  try {
+    await POST('/api/v1/tracking/follow', { keyword, shop_domain: S.currentShop, source: source || 'manual' })
+    toast(`📌 Now following: ${keyword}`, 'success')
+  } catch(e) { toast('Failed to follow: ' + e.message, 'error') }
+}
+
+function renderTrackingTab() {
+  return `
+    <div class="card">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="font-semibold text-gray-800">📌 Keyword Tracking</h2>
+          <p class="text-sm text-gray-500 mt-0.5">Daily ranking, clicks and search volume for followed keywords</p>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary btn-sm" onclick="triggerCollect(this)">↻ Collect Now</button>
+          <button class="btn btn-primary btn-sm" onclick="openAddFollowModal()">+ Follow Keyword</button>
+        </div>
+      </div>
+      <div id="tracking-list"><div class="flex justify-center py-10"><div class="spinner-dark"></div></div></div>
+    </div>`
+}
+
+async function initTrackingTab() {
+  await loadTrackingList()
+}
+
+async function loadTrackingList() {
+  const el = document.getElementById('tracking-list')
+  if (!el) return
+  try {
+    const shopParam = S.currentShop ? `?shop_domain=${encodeURIComponent(S.currentShop)}&active_only=true` : '?active_only=true'
+    const follows = await GET('/api/v1/tracking/follows' + shopParam)
+    renderTrackingList(follows)
+  } catch(e) {
+    if (el) el.innerHTML = `<div class="text-red-500 text-sm p-4">Error: ${esc(e.message)}</div>`
+  }
+}
+
+function renderTrackingList(follows) {
+  const el = document.getElementById('tracking-list')
+  if (!el) return
+  if (!follows.length) {
+    el.innerHTML = `<div class="text-center py-10 text-gray-400">
+      <div class="text-3xl mb-2">📌</div>
+      <div class="text-sm">No keywords followed yet.</div>
+      <div class="text-xs mt-1">Use the 📌 button in Search Console or Keyword Research to follow keywords.</div>
+    </div>`
+    return
+  }
+
+  const posBadge = pos => {
+    if (pos == null) return '<span class="text-gray-300">—</span>'
+    const col = pos<=3?'text-green-600 font-bold':pos<=10?'text-blue-600':pos<=20?'text-yellow-600':'text-gray-500'
+    return `<span class="${col}">#${pos.toFixed(1)}</span>`
+  }
+
+  const changeBadge = ch => {
+    if (ch == null) return '<span class="text-gray-300">—</span>'
+    if (ch > 0) return `<span class="text-green-600 text-xs">▲${ch}</span>`
+    if (ch < 0) return `<span class="text-red-500 text-xs">▼${Math.abs(ch)}</span>`
+    return `<span class="text-gray-400 text-xs">—</span>`
+  }
+
+  el.innerHTML = `
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b border-gray-100 text-xs text-gray-400 uppercase">
+          <th class="text-left py-2 px-3">Keyword</th>
+          <th class="text-right py-2 px-3">Position</th>
+          <th class="text-right py-2 px-3">Change</th>
+          <th class="text-right py-2 px-3">Clicks</th>
+          <th class="text-right py-2 px-3">Impressions</th>
+          <th class="text-right py-2 px-3">Volume/mo</th>
+          <th class="text-right py-2 px-3">Last Updated</th>
+          <th class="py-2 px-3"></th>
+        </tr></thead>
+        <tbody>
+          ${follows.map(f => {
+            const lat = f.latest
+            return `<tr class="border-b border-gray-50 table-row">
+              <td class="py-2 px-3">
+                <div class="font-medium text-gray-800">${esc(f.keyword)}</div>
+                <div class="text-xs text-gray-400">${esc(f.source)}</div>
+              </td>
+              <td class="text-right py-2 px-3">${posBadge(lat?.position)}</td>
+              <td class="text-right py-2 px-3">${changeBadge(f.position_change)}</td>
+              <td class="text-right py-2 px-3 text-gray-600">${lat?.clicks != null ? lat.clicks.toLocaleString() : '<span class="text-gray-300">—</span>'}</td>
+              <td class="text-right py-2 px-3 text-gray-600">${lat?.impressions != null ? lat.impressions.toLocaleString() : '<span class="text-gray-300">—</span>'}</td>
+              <td class="text-right py-2 px-3 text-gray-600">${lat?.volume != null ? lat.volume.toLocaleString() : '<span class="text-gray-300">—</span>'}</td>
+              <td class="text-right py-2 px-3 text-xs text-gray-400">${lat?.date || '<span class="text-gray-300">No data</span>'}</td>
+              <td class="py-2 px-3 action-btns">
+                <div class="flex gap-1 justify-end">
+                  <button class="btn btn-secondary btn-sm" onclick="viewKeywordHistory(${f.id},'${esc(f.keyword)}')" title="View history">📈</button>
+                  <button class="btn btn-danger btn-sm" onclick="unfollowKeyword(${f.id},'${esc(f.keyword)}')" title="Unfollow">✕</button>
+                </div>
+              </td>
+            </tr>`
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`
+}
+
+async function triggerCollect(btnEl) {
+  const shopParam = S.currentShop ? `?shop_domain=${encodeURIComponent(S.currentShop)}` : ''
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<span class="spinner"></span> Collecting…' }
+  try {
+    const res = await POST('/api/v1/tracking/collect' + shopParam, null)
+    toast(`Collected ${res.collected} snapshots for ${res.date}`, 'success')
+    await loadTrackingList()
+  } catch(e) {
+    toast('Collect failed: ' + e.message, 'error')
+  } finally {
+    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '↻ Collect Now' }
+  }
+}
+
+function openAddFollowModal() {
+  openModal('Follow a Keyword', `
+    <div class="space-y-3">
+      <div>
+        <label>Keyword</label>
+        <input type="text" id="follow-kw-input" placeholder="e.g. running shoes for women"
+          onkeyup="if(event.key==='Enter')doAddFollow()">
+      </div>
+      <div>
+        <label>Source</label>
+        <select id="follow-kw-source">
+          <option value="manual">Manual</option>
+          <option value="gsc">Search Console</option>
+          <option value="research">Keyword Research</option>
+        </select>
+      </div>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+     <button class="btn btn-primary" onclick="doAddFollow()">📌 Follow</button>`)
+  setTimeout(() => document.getElementById('follow-kw-input')?.focus(), 100)
+}
+
+async function doAddFollow() {
+  const kw = document.getElementById('follow-kw-input')?.value?.trim()
+  const source = document.getElementById('follow-kw-source')?.value || 'manual'
+  if (!kw) { toast('Enter a keyword', 'error'); return }
+  if (!S.currentShop) { toast('Select a store first', 'error'); return }
+  try {
+    await POST('/api/v1/tracking/follow', { keyword: kw, shop_domain: S.currentShop, source })
+    toast(`📌 Now following: ${kw}`, 'success')
+    closeModal()
+    await loadTrackingList()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function unfollowKeyword(id, keyword) {
+  if (!confirm(`Stop tracking "${keyword}"?`)) return
+  try {
+    await DEL(`/api/v1/tracking/follow/${id}`)
+    toast(`Unfollowed: ${keyword}`, 'success')
+    await loadTrackingList()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function viewKeywordHistory(followId, keyword) {
+  openModal(`📈 ${keyword}`, `<div class="flex justify-center py-10"><div class="spinner-dark"></div></div>`, '')
+  try {
+    const data = await GET(`/api/v1/tracking/follows/${followId}/history?days=90`)
+    renderKeywordHistoryModal(data)
+  } catch(e) {
+    document.getElementById('modal-body').innerHTML = `<div class="text-red-500 text-sm">Error: ${esc(e.message)}</div>`
+  }
+}
+
+function renderKeywordHistoryModal(data) {
+  const hist = data.history || []
+  const el = document.getElementById('modal-body')
+  if (!el) return
+
+  if (!hist.length) {
+    el.innerHTML = `<div class="text-center py-8 text-gray-400">No history data yet. Run a collection first.</div>`
+    return
+  }
+
+  const posBadge = pos => {
+    if (pos == null) return '—'
+    const col = pos<=3?'text-green-600 font-bold':pos<=10?'text-blue-600':pos<=20?'text-yellow-600':'text-gray-500'
+    return `<span class="${col}">#${pos.toFixed(1)}</span>`
+  }
+
+  // Sparkline SVG from position data
+  const positions = hist.map(h => h.position).filter(p => p != null)
+  let sparklineSvg = ''
+  if (positions.length >= 2) {
+    const w = 400, h = 60, pad = 4
+    const maxP = Math.max(...positions), minP = Math.min(...positions)
+    const range = maxP - minP || 1
+    const pts = positions.map((p, i) => {
+      const x = pad + (i / (positions.length - 1)) * (w - pad*2)
+      const y = h - pad - ((p - minP) / range) * (h - pad*2)
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    }).join(' ')
+    sparklineSvg = `<div class="mb-4">
+      <div class="text-xs text-gray-400 mb-1">Position trend (lower = better)</div>
+      <svg viewBox="0 0 ${w} ${h}" class="w-full h-16 border border-gray-100 rounded-lg bg-gray-50">
+        <polyline points="${pts}" fill="none" stroke="rgb(79,70,229)" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
+    </div>`
+  }
+
+  el.innerHTML = `
+    ${sparklineSvg}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b border-gray-100 text-xs text-gray-400 uppercase">
+          <th class="text-left py-1.5 px-2">Date</th>
+          <th class="text-right py-1.5 px-2">Position</th>
+          <th class="text-right py-1.5 px-2">Clicks</th>
+          <th class="text-right py-1.5 px-2">Impressions</th>
+          <th class="text-right py-1.5 px-2">CTR</th>
+          <th class="text-right py-1.5 px-2">Volume</th>
+        </tr></thead>
+        <tbody>
+          ${[...hist].reverse().map(h => `
+            <tr class="border-b border-gray-50">
+              <td class="py-1.5 px-2 text-gray-600">${esc(h.date||'')}</td>
+              <td class="text-right py-1.5 px-2">${posBadge(h.position)}</td>
+              <td class="text-right py-1.5 px-2 text-gray-600">${h.clicks != null ? h.clicks.toLocaleString() : '—'}</td>
+              <td class="text-right py-1.5 px-2 text-gray-600">${h.impressions != null ? h.impressions.toLocaleString() : '—'}</td>
+              <td class="text-right py-1.5 px-2 text-gray-600">${h.ctr != null ? (h.ctr*100).toFixed(1)+'%' : '—'}</td>
+              <td class="text-right py-1.5 px-2 text-gray-600">${h.volume != null ? h.volume.toLocaleString() : '—'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`
 }
 
 // ═══════════════════ SHOPIFY CONNECT ═════════════════════════
@@ -2351,6 +3784,429 @@ async function selectShop(shop) {
   if (typeof nav === 'function' && S.page) nav(S.page)
 }
 
+// ══════════════════════ AI PIPELINE ═══════════════════════
+
+const AGENT_META = {
+  research:           { icon: '🔍', label: 'Research',         desc: 'Keyword analysis, search volume, anchor text' },
+  learning_pre:       { icon: '🧠', label: 'Learning (pre)',    desc: 'Synthesize lessons from past data' },
+  copywrite:          { icon: '✍️', label: 'Copywrite',         desc: 'Write SEO article with brand + lessons' },
+  audit:              { icon: '📈', label: 'Audit',             desc: 'Check SEO quality, score & feedback' },
+  copywrite_revision: { icon: '🔄', label: 'Revision',          desc: 'Rewrite based on audit feedback' },
+  learning_post:      { icon: '📚', label: 'Learning (post)',   desc: 'Simulate review, record lessons' },
+}
+
+let _pipelineRunId = null
+let _pipelinePoller = null
+
+async function renderPipeline() {
+  document.getElementById('header-actions').innerHTML =
+    `<button class="btn btn-secondary btn-sm" onclick="loadPipelineLessons()">🧠 View Lessons</button>
+     <button class="btn btn-secondary btn-sm" onclick="loadPipelinePlan()">📊 Planning</button>`
+
+  document.getElementById('content').innerHTML = `
+    <div class="space-y-6">
+
+      <!-- Run Form -->
+      <div class="card">
+        <h2 class="font-semibold text-gray-800 mb-4">🤖 Run AI Pipeline</h2>
+        <p class="text-xs text-gray-500 mb-4">5 agents work in sequence: Research → Learning → Copywrite → Audit (→ re-write if needed) → Learning post-analysis.</p>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label>Article Title <span class="text-red-500">*</span></label>
+            <input id="pipe-title" type="text" placeholder="e.g. How to Choose the Best Running Shoes">
+          </div>
+          <div>
+            <label>Focus Keyword <span class="text-red-500">*</span></label>
+            <input id="pipe-kw" type="text" placeholder="e.g. best running shoes">
+          </div>
+          <div>
+            <label>Language</label>
+            <select id="pipe-lang">
+              <option value="en">English</option><option value="vi">Vietnamese</option>
+              <option value="de">German</option><option value="fr">French</option>
+              <option value="ja">Japanese</option><option value="ko">Korean</option>
+            </select>
+          </div>
+          <div>
+            <label>Country</label>
+            <select id="pipe-country">
+              <option value="us">🇺🇸 US</option><option value="gb">🇬🇧 UK</option>
+              <option value="au">🇦🇺 AU</option><option value="ca">🇨🇦 CA</option>
+              <option value="vn">🇻🇳 VN</option><option value="sg">🇸🇬 SG</option>
+              <option value="de">🇩🇪 DE</option><option value="fr">🇫🇷 FR</option>
+            </select>
+          </div>
+          <div>
+            <label>Target words</label>
+            <select id="pipe-words">
+              <option value="1200">1,200</option><option value="1500" selected>1,500</option>
+              <option value="2000">2,000</option><option value="2500">2,500</option>
+            </select>
+          </div>
+          <div>
+            <label>Platform</label>
+            <select id="pipe-platform">
+              <option value="google">Google SEO</option>
+              <option value="shopify">Shopify</option>
+              <option value="wordpress">WordPress</option>
+              <option value="youtube">YouTube</option>
+            </select>
+          </div>
+          <div>
+            <label>Audit iterations</label>
+            <select id="pipe-iters">
+              <option value="1">1 (faster)</option>
+              <option value="2" selected>2 (recommended)</option>
+              <option value="3">3 (thorough)</option>
+            </select>
+          </div>
+          <div>
+            <label>Notes (optional)</label>
+            <input id="pipe-notes" type="text" placeholder="Any special requirements...">
+          </div>
+        </div>
+        <button id="pipe-btn" class="btn btn-primary" onclick="startPipeline()">🚀 Run Full Pipeline</button>
+      </div>
+
+      <!-- Agent Flow Visualization -->
+      <div id="pipe-flow" class="hidden card">
+        <h3 class="font-semibold text-gray-700 mb-4">Pipeline Progress</h3>
+        <div id="pipe-agents" class="flex flex-col gap-2"></div>
+      </div>
+
+      <!-- Pipeline Result -->
+      <div id="pipe-result"></div>
+
+      <!-- Recent Runs -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-gray-700">Recent Runs</h3>
+          <button class="btn btn-secondary btn-sm" onclick="loadPipelineRuns()">↻ Refresh</button>
+        </div>
+        <div id="pipe-runs"><div class="text-xs text-gray-400">Loading…</div></div>
+      </div>
+
+    </div>`
+
+  loadPipelineRuns()
+}
+
+async function startPipeline() {
+  const title = document.getElementById('pipe-title')?.value?.trim()
+  const kw    = document.getElementById('pipe-kw')?.value?.trim()
+  if (!title || !kw) { toast('Enter title and keyword', 'error'); return }
+
+  const btn = document.getElementById('pipe-btn')
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Starting pipeline…'
+
+  document.getElementById('pipe-flow').classList.remove('hidden')
+  document.getElementById('pipe-result').innerHTML = ''
+  renderAgentFlow([])
+
+  try {
+    const r = await POST('/api/v1/pipeline/run', {
+      title,
+      keyword: kw,
+      shop_domain: S.currentShop || null,
+      language:    document.getElementById('pipe-lang')?.value || 'en',
+      country:     document.getElementById('pipe-country')?.value || 'us',
+      word_count:  parseInt(document.getElementById('pipe-words')?.value || '1500'),
+      target_platform: document.getElementById('pipe-platform')?.value || 'google',
+      max_audit_iterations: parseInt(document.getElementById('pipe-iters')?.value || '2'),
+      notes: document.getElementById('pipe-notes')?.value?.trim() || null,
+    })
+    renderAgentFlow(r.steps || [])
+    renderPipelineResult(r)
+    loadPipelineRuns()
+    toast('✅ Pipeline complete!', 'success')
+  } catch(e) {
+    document.getElementById('pipe-result').innerHTML =
+      `<div class="card text-red-500 text-sm p-4">Pipeline failed: ${esc(e.message)}</div>`
+    toast('Pipeline failed: ' + e.message, 'error')
+  } finally {
+    btn.disabled = false; btn.innerHTML = '🚀 Run Full Pipeline'
+  }
+}
+
+function renderAgentFlow(steps) {
+  const el = document.getElementById('pipe-agents')
+  if (!el) return
+
+  const AGENTS = ['research','learning_pre','copywrite','audit','copywrite_revision','learning_post']
+  const stepMap = {}
+  for (const s of steps) {
+    stepMap[s.agent] = s
+  }
+
+  const statusIcon = s => !s ? '⏳' : s.status === 'running' ? '<span class="spinner inline-block w-3 h-3"></span>' : s.status === 'done' ? '✅' : '❌'
+  const statusColor = s => !s ? 'border-gray-200 bg-gray-50' : s.status === 'running' ? 'border-indigo-300 bg-indigo-50' : s.status === 'done' ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'
+
+  el.innerHTML = AGENTS.map(key => {
+    const meta = AGENT_META[key] || { icon: '🤖', label: key, desc: '' }
+    const step = stepMap[key]
+    const dataLines = step?.data ? Object.entries(step.data)
+      .filter(([k, v]) => v !== null && v !== undefined && !Array.isArray(v))
+      .slice(0, 3)
+      .map(([k, v]) => `<span class="text-xs text-gray-500">${k}: <strong>${typeof v === 'object' ? JSON.stringify(v) : esc(String(v))}</strong></span>`)
+      .join('  ') : ''
+    return `
+      <div class="flex items-start gap-3 p-3 border rounded-lg ${statusColor(step)}">
+        <div class="text-xl shrink-0 mt-0.5">${meta.icon}</div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="font-medium text-sm text-gray-800">${meta.label}</span>
+            <span class="text-xs text-gray-400">${meta.desc}</span>
+            <span class="ml-auto">${statusIcon(step)}</span>
+          </div>
+          ${dataLines ? `<div class="mt-1 flex flex-wrap gap-3">${dataLines}</div>` : ''}
+        </div>
+      </div>`
+  }).join('')
+}
+
+function renderPipelineResult(r) {
+  const el = document.getElementById('pipe-result')
+  if (!el) return
+
+  const audit = r.audit || {}
+  const sim = r.simulated_feedback || {}
+  const article = r.article || {}
+
+  const gradeColor = g => ({A:'text-green-600 bg-green-50 border-green-200', B:'text-blue-600 bg-blue-50 border-blue-200', C:'text-yellow-600 bg-yellow-50 border-yellow-200', D:'text-orange-600 bg-orange-50 border-orange-200', F:'text-red-600 bg-red-50 border-red-200'})[g] || 'text-gray-600 bg-gray-50 border-gray-200'
+
+  el.innerHTML = `
+    <div class="card space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="font-semibold text-gray-800">Pipeline Result</h3>
+        <div class="flex gap-2">
+          ${article.id ? `<button class="btn btn-primary btn-sm" onclick="openPublishModal(${article.id},'${esc(article.title || '')}')">🚀 Publish</button>` : ''}
+          ${article.id ? `<button class="btn btn-secondary btn-sm" onclick="nav('posts')">📝 View Post</button>` : ''}
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-3">
+        <!-- Audit Score -->
+        <div class="border rounded-xl p-3 text-center ${audit.ready ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}">
+          <div class="text-2xl font-bold ${gradeColor(audit.grade)} border rounded-lg inline-block px-2 py-0.5 mb-1">${audit.grade || '—'}</div>
+          <div class="text-sm font-medium text-gray-700">Audit Score: ${audit.score || 0}/100</div>
+          <div class="text-xs text-gray-500 mt-0.5">${audit.ready ? '✅ Ready to publish' : '⚠️ Needs review'}</div>
+        </div>
+
+        <!-- Simulated User Review -->
+        <div class="border rounded-xl p-3 text-center border-purple-200 bg-purple-50">
+          <div class="text-2xl font-bold text-purple-700 mb-1">${'★'.repeat(sim.simulated_rating || 0)}${'☆'.repeat(5-(sim.simulated_rating||0))}</div>
+          <div class="text-sm font-medium text-gray-700">AI Review: ${sim.simulated_rating || '—'}/5</div>
+          <div class="text-xs text-gray-500 mt-0.5">${sim.would_publish ? '✅ Would publish' : '⚠️ Needs work'}</div>
+        </div>
+
+        <!-- Lessons Applied -->
+        <div class="border rounded-xl p-3 text-center border-blue-200 bg-blue-50">
+          <div class="text-2xl font-bold text-blue-700 mb-1">${r.lessons_applied || 0}</div>
+          <div class="text-sm font-medium text-gray-700">Lessons Applied</div>
+          <div class="text-xs text-gray-500 mt-0.5">from Learning Agent</div>
+        </div>
+      </div>
+
+      <!-- Article preview -->
+      ${article.title ? `
+        <div class="p-3 bg-gray-50 rounded-lg">
+          <div class="font-medium text-gray-800 text-sm">${esc(article.title)}</div>
+          ${article.seo_title ? `<div class="text-xs text-gray-500 mt-1">SEO: ${esc(article.seo_title)}</div>` : ''}
+          ${article.content_preview ? `<div class="text-xs text-gray-400 mt-2 line-clamp-3">${esc(article.content_preview)}</div>` : ''}
+        </div>` : ''}
+
+      <!-- AI Review feedback -->
+      ${sim.simulated_feedback ? `
+        <div class="p-3 bg-purple-50 rounded-lg border border-purple-100">
+          <div class="text-xs font-semibold text-purple-700 mb-1">🤖 Simulated Expert Review</div>
+          <div class="text-sm text-gray-700">${esc(sim.simulated_feedback)}</div>
+          ${sim.strengths?.length ? `<div class="mt-2 flex flex-wrap gap-1">${sim.strengths.slice(0,3).map(s => `<span class="text-xs bg-green-100 text-green-700 rounded px-2 py-0.5">✓ ${esc(s)}</span>`).join('')}</div>` : ''}
+        </div>` : ''}
+
+      <!-- Audit issues -->
+      ${(audit.issues?.length || audit.warnings?.length) ? `
+        <div class="space-y-1">
+          ${(audit.issues||[]).map(i => `<div class="text-xs text-red-700 flex gap-1.5"><span>✗</span><span>${esc(i)}</span></div>`).join('')}
+          ${(audit.warnings||[]).map(w => `<div class="text-xs text-amber-700 flex gap-1.5"><span>⚠</span><span>${esc(w)}</span></div>`).join('')}
+        </div>` : ''}
+
+      <!-- Action buttons -->
+      ${r.post_id ? `
+        <div class="flex gap-2 pt-2 border-t border-gray-100">
+          <button class="btn btn-secondary btn-sm" onclick="editPost(${r.post_id})">📝 View &amp; Edit Draft</button>
+          <button class="btn btn-primary btn-sm" onclick="openPublishModal(${r.post_id},'')">🚀 Publish</button>
+        </div>` : ''}
+    </div>`
+}
+
+async function loadPipelineRuns() {
+  const el = document.getElementById('pipe-runs')
+  if (!el) return
+  try {
+    const runs = await GET(`/api/v1/pipeline/runs?${S.currentShop ? 'shop_domain='+encodeURIComponent(S.currentShop)+'&' : ''}limit=10`)
+    if (!runs.length) { el.innerHTML = '<div class="text-xs text-gray-400 py-2">No pipeline runs yet.</div>'; return }
+
+    const statusBadge2 = s => ({
+      running: '<span class="badge badge-blue">⏳ Running</span>',
+      done:    '<span class="badge badge-green">✅ Done</span>',
+      failed:  '<span class="badge" style="background:#fee2e2;color:#dc2626">❌ Failed</span>',
+    })[s] || `<span class="badge">${s}</span>`
+
+    el.innerHTML = `<div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead><tr class="border-b border-gray-100 text-xs text-gray-400 uppercase">
+        <th class="text-left py-2">Keyword</th>
+        <th class="text-left py-2">Status</th>
+        <th class="text-left py-2">Steps</th>
+        <th class="text-left py-2">Created</th>
+        <th class="py-2"></th>
+      </tr></thead>
+      <tbody>
+        ${runs.map(r => `
+          <tr class="border-b border-gray-50 table-row">
+            <td class="py-2 font-medium text-gray-800">${esc(r.keyword)}</td>
+            <td class="py-2">${statusBadge2(r.status)}</td>
+            <td class="py-2 text-gray-500 text-xs">${r.step_count} steps</td>
+            <td class="py-2 text-gray-400 text-xs">${r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</td>
+            <td class="py-2">
+              <div class="flex gap-1 action-btns">
+                <button class="btn btn-secondary btn-sm" onclick="viewPipelineRun(${r.id})">Details</button>
+                ${r.post_id ? `<button class="btn btn-secondary btn-sm" onclick="editPost(${r.post_id})">📝 Draft</button>` : ''}
+                ${r.post_id ? `<button class="btn btn-primary btn-sm" onclick="openPublishModal(${r.post_id},'')">Publish</button>` : ''}
+              </div>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>`
+  } catch(e) {
+    el.innerHTML = `<div class="text-xs text-red-500">Failed to load runs: ${esc(e.message)}</div>`
+  }
+}
+
+async function viewPipelineRun(runId) {
+  try {
+    const run = await GET(`/api/v1/pipeline/runs/${runId}`)
+    openModal(`Pipeline Run #${runId} — ${esc(run.keyword)}`,
+      `<div class="space-y-3">
+        <div class="flex gap-3 text-xs text-gray-500">
+          <span>Status: <strong>${run.status}</strong></span>
+          <span>Post: <strong>${run.post_id || '—'}</strong></span>
+          <span>Created: <strong>${run.created_at ? new Date(run.created_at).toLocaleString() : '—'}</strong></span>
+        </div>
+        ${run.error ? `<div class="text-xs text-red-600 bg-red-50 p-2 rounded">${esc(run.error)}</div>` : ''}
+        <div class="space-y-2">
+          ${(run.steps || []).map(s => {
+            const meta = AGENT_META[s.agent] || { icon: '🤖', label: s.agent }
+            const dataStr = s.data ? JSON.stringify(s.data, null, 2) : ''
+            return `<div class="p-2 border rounded-lg ${s.status === 'done' ? 'border-green-200 bg-green-50' : 'border-gray-200'}">
+              <div class="text-xs font-semibold text-gray-700">${meta.icon} ${meta.label} — ${s.status}</div>
+              ${dataStr ? `<pre class="text-xs text-gray-500 mt-1 overflow-x-auto" style="max-height:80px">${esc(dataStr)}</pre>` : ''}
+            </div>`
+          }).join('')}
+        </div>
+      </div>`,
+      `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>
+       ${run.post_id ? `<button class="btn btn-secondary btn-sm" onclick="closeModal();editPost(${run.post_id})">📝 View &amp; Edit Draft</button>` : ''}
+       ${run.post_id ? `<button class="btn btn-primary btn-sm" onclick="closeModal();openPublishModal(${run.post_id},'')">🚀 Publish Article</button>` : ''}`
+    )
+  } catch(e) { toast('Failed to load run: ' + e.message, 'error') }
+}
+
+async function loadPipelineLessons() {
+  try {
+    const data = await GET(`/api/v1/pipeline/lessons?${S.currentShop ? 'shop_domain='+encodeURIComponent(S.currentShop) : ''}`)
+    const lessons = data.lessons || []
+
+    openModal('🧠 Learning Agent — Lessons',
+      `<div class="space-y-3">
+        <p class="text-xs text-gray-500">Synthesized from user feedback, keyword rankings, and audit scores. Used automatically in every pipeline run.</p>
+        ${lessons.length ? `
+          <div class="space-y-2">
+            ${lessons.map(l => `<div class="flex gap-2 p-2 bg-gray-50 rounded-lg text-sm">
+              <span class="shrink-0">${l.startsWith('✅') ? '✅' : l.startsWith('⚠️') ? '⚠️' : '💡'}</span>
+              <span class="text-gray-700">${esc(l.replace(/^[✅⚠️💡]\s*/,''))}</span>
+            </div>`).join('')}
+          </div>` : `<div class="text-gray-400 text-sm text-center py-6">No lessons yet. Run the pipeline a few times to accumulate learning data.</div>`}
+        <div class="pt-2 border-t">
+          <button class="btn btn-secondary btn-sm" onclick="triggerLearnNow(this)">🔄 Synthesize lessons now</button>
+          <span class="text-xs text-gray-400 ml-2">${data.source_count || 0} knowledge entries</span>
+        </div>
+      </div>`,
+      `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>`
+    )
+  } catch(e) { toast('Failed to load lessons: ' + e.message, 'error') }
+}
+
+async function triggerLearnNow(btn) {
+  if (!S.currentShop) { toast('Select a store first', 'error'); return }
+  btn.disabled = true; btn.textContent = 'Synthesizing…'
+  try {
+    const r = await POST('/api/v1/pipeline/learn', { shop_domain: S.currentShop })
+    toast(`🧠 ${r.count} lessons synthesized!`, 'success')
+    closeModal()
+    loadPipelineLessons()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+  finally { btn.disabled = false; btn.textContent = '🔄 Synthesize lessons now' }
+}
+
+async function loadPipelinePlan() {
+  if (!S.currentShop) { toast('Select a store first', 'error'); return }
+  const btn = document.querySelector('[onclick="loadPipelinePlan()"]')
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>' }
+
+  try {
+    const data = await POST('/api/v1/pipeline/plan', { shop_domain: S.currentShop })
+    const strat = data.strategy || {}
+    const tracking = data.tracking_summary || {}
+    const gsc = data.gsc_summary || {}
+
+    openModal('📊 Planning Agent — Strategy',
+      `<div class="space-y-4">
+        <!-- Summary -->
+        ${strat.summary ? `<div class="p-3 bg-blue-50 border border-blue-100 rounded-lg text-sm text-gray-700">${esc(strat.summary)}</div>` : ''}
+
+        <!-- Stats row -->
+        <div class="grid grid-cols-4 gap-3">
+          ${[
+            {label:'Tracked KWs', val: tracking.total_tracked || 0},
+            {label:'Top 10', val: tracking.top_10 || 0},
+            {label:'Improving', val: tracking.improving || 0},
+            {label:'GSC Clicks (28d)', val: (gsc.total_clicks||0).toLocaleString()},
+          ].map(x => `<div class="text-center p-2 bg-gray-50 rounded-lg">
+            <div class="text-lg font-bold text-gray-800">${x.val}</div>
+            <div class="text-xs text-gray-500">${x.label}</div>
+          </div>`).join('')}
+        </div>
+
+        <!-- Priority keywords -->
+        ${strat.priority_keywords?.length ? `
+          <div>
+            <div class="text-xs font-semibold text-gray-500 uppercase mb-2">Priority Keywords to Target</div>
+            <div class="space-y-1.5">
+              ${strat.priority_keywords.slice(0,6).map(k => `
+                <div class="flex items-start gap-2 p-2 border rounded-lg bg-gray-50">
+                  <span class="text-xs font-bold ${k.opportunity === 'high' ? 'text-green-600' : k.opportunity === 'medium' ? 'text-yellow-600' : 'text-gray-500'} w-12 shrink-0">${(k.opportunity||'').toUpperCase()}</span>
+                  <div class="min-w-0">
+                    <div class="text-sm font-medium text-gray-800">${esc(k.keyword || '')}</div>
+                    <div class="text-xs text-gray-500">${esc(k.reason || '')} · ${esc(k.action || '')}</div>
+                  </div>
+                  <button class="btn btn-secondary btn-sm shrink-0" onclick="closeModal();document.getElementById('pipe-kw').value='${esc(k.keyword||'')}';nav('pipeline')">Use →</button>
+                </div>`).join('')}
+            </div>
+          </div>` : ''}
+
+        <!-- Recommendations -->
+        ${strat.recommendations?.length ? `
+          <div>
+            <div class="text-xs font-semibold text-gray-500 uppercase mb-2">Recommendations</div>
+            ${strat.recommendations.slice(0,5).map(r => `<div class="text-sm text-gray-700 flex gap-2 py-1"><span class="text-indigo-400">→</span>${esc(r)}</div>`).join('')}
+          </div>` : ''}
+      </div>`,
+      `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>`
+    )
+  } catch(e) { toast('Planning failed: ' + e.message, 'error') }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = '📊 Planning' } }
+}
+
 // ══════════════════════ KNOWLEDGE BASE ═══════════════════════
 async function renderKnowledge() {
   if (!S.user?.can_access_kb) {
@@ -2421,6 +4277,15 @@ async function renderKnowledge() {
         <div id="kb-rank-result" class="mt-3 text-xs"></div>
       </div>
 
+      <!-- Platform Guidelines -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm font-semibold text-gray-700">🎯 Platform SEO Guidelines</div>
+          <span class="text-xs text-gray-400">Injected into articles automatically based on target platform</span>
+        </div>
+        <div id="kb-platforms-list">${skeletons(2)}</div>
+      </div>
+
       <!-- Search -->
       <div class="card">
         <div class="text-sm font-semibold text-gray-700 mb-3">🧠 Knowledge Items</div>
@@ -2452,6 +4317,7 @@ async function renderKnowledge() {
   kbLoadItems()
   kbLoadJobs()
   kbLoadStores()
+  kbLoadPlatforms()
 }
 
 // ── KB Stats ──────────────────────────────────────────────────
@@ -2748,51 +4614,289 @@ async function kbAnalyzeRankings() {
   }
 }
 
+// ── KB Platform Guidelines ────────────────────────────────────
+async function kbLoadPlatforms() {
+  const el = document.getElementById('kb-platforms-list')
+  if (!el) return
+  try {
+    const platforms = await GET('/api/v1/knowledge/platforms')
+    el.innerHTML = `
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        ${platforms.map(p => `
+          <div class="border border-gray-200 rounded-lg p-3 flex flex-col gap-2">
+            <div class="flex items-center gap-2">
+              <span class="text-lg">${esc(p.icon||'🔍')}</span>
+              <div class="flex-1 min-w-0">
+                <div class="text-sm font-semibold text-gray-800 truncate">${esc(p.display_name)}</div>
+                <div class="text-xs text-gray-400 truncate">${esc(p.content_preview||'')}</div>
+              </div>
+              <span class="text-xs px-1.5 py-0.5 rounded ${p.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}">${p.is_active ? 'Active' : 'Off'}</span>
+            </div>
+            <div class="flex gap-2">
+              <button class="btn btn-secondary btn-sm flex-1" style="justify-content:center;font-size:11px" onclick="kbEditPlatform(${esc(JSON.stringify(p.platform))})">✏️ Edit</button>
+              <button class="btn btn-secondary btn-sm" style="font-size:11px" onclick="kbResetPlatform(${esc(JSON.stringify(p.platform))})">↺ Reset</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>`
+  } catch(e) {
+    el.innerHTML = `<div class="text-red-500 text-xs">Error: ${esc(e.message)}</div>`
+  }
+}
+
+async function kbEditPlatform(platform) {
+  try {
+    const p = await GET(`/api/v1/knowledge/platforms/${encodeURIComponent(platform)}`)
+    openModal(`${esc(p.icon)} Edit: ${esc(p.display_name)} SEO Guidelines`, `
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">Display Name</label>
+          <input id="pg-name" class="input" value="${esc(p.display_name)}">
+        </div>
+        <div>
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" id="pg-active" class="rounded" ${p.is_active ? 'checked' : ''}>
+            Active — inject into articles for this platform
+          </label>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">Guidelines Content (injected into AI prompt)</label>
+          <textarea id="pg-content" rows="14" class="input font-mono text-xs w-full" style="resize:vertical">${esc(p.content)}</textarea>
+        </div>
+      </div>`,
+      `<button class="btn btn-primary" onclick="kbSavePlatform(${esc(JSON.stringify(platform))})">💾 Save</button>
+       <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>`
+    )
+  } catch(e) {
+    toast('Error loading platform: ' + e.message, 'error')
+  }
+}
+
+async function kbSavePlatform(platform) {
+  const name = document.getElementById('pg-name')?.value?.trim()
+  const content = document.getElementById('pg-content')?.value
+  const active = document.getElementById('pg-active')?.checked ?? true
+  if (!content?.trim()) { toast('Content cannot be empty', 'error'); return }
+  try {
+    await PUT(`/api/v1/knowledge/platforms/${encodeURIComponent(platform)}`, {
+      display_name: name, content, is_active: active
+    })
+    closeModal()
+    toast('✅ Platform guidelines saved', 'success')
+    kbLoadPlatforms()
+  } catch(e) {
+    toast('Save failed: ' + e.message, 'error')
+  }
+}
+
+async function kbResetPlatform(platform) {
+  if (!confirm(`Reset "${platform}" guidelines to built-in default? This will overwrite your edits.`)) return
+  try {
+    await POST(`/api/v1/knowledge/platforms/${encodeURIComponent(platform)}/reset`, {})
+    toast('↺ Reset to default', 'success')
+    kbLoadPlatforms()
+  } catch(e) {
+    toast('Reset failed: ' + e.message, 'error')
+  }
+}
+
 // ══════════════════════ BRAND PROFILE ════════════════════════
+// ═══════════════════ PRODUCTS KB ════════════════════════
+
+async function renderProducts() {
+  document.getElementById('header-actions').innerHTML = ''
+  document.getElementById('content').innerHTML = `
+    <div class="grid gap-4" style="grid-template-columns:1fr 1fr">
+
+      <!-- Search & add -->
+      <div class="card">
+        <div class="text-sm font-semibold text-gray-700 mb-3">🔍 Find products to track</div>
+        <p class="text-xs text-gray-400 mb-3">Search Shopify live — full product data is always fetched fresh from Shopify when generating articles.</p>
+        <div class="flex gap-2 mb-3">
+          <input type="text" id="prod-kw" placeholder="Search keyword…" style="flex:1"
+            onkeyup="if(event.key==='Enter')searchLiveProducts()">
+          <button class="btn btn-primary btn-sm" onclick="searchLiveProducts()">Search</button>
+        </div>
+        <div id="prod-search-results" class="space-y-2 max-h-96 overflow-y-auto"></div>
+      </div>
+
+      <!-- Tracked list -->
+      <div class="card">
+        <div class="text-sm font-semibold text-gray-700 mb-1">📌 Tracked Products <span id="prod-count" class="text-gray-400 font-normal"></span></div>
+        <p class="text-xs text-gray-400 mb-3">Products tracked for SEO ranking. Only identification is stored locally.</p>
+        <div id="prod-tracked-list">${skeletons(4)}</div>
+      </div>
+    </div>`
+
+  loadTrackedProducts()
+}
+
+async function searchLiveProducts() {
+  if (!S.currentShop) { toast('Select a store first', 'error'); return }
+  const kw = document.getElementById('prod-kw')?.value.trim()
+  if (!kw) return
+  const el = document.getElementById('prod-search-results')
+  if (el) el.innerHTML = `<div class="text-xs text-gray-400">${skeletons(3)}</div>`
+  try {
+    const results = await POST('/api/v1/products/search', { shop_domain: S.currentShop, keyword: kw, limit: 10 })
+    if (!el) return
+    if (!results.length) {
+      el.innerHTML = `<div class="text-xs text-gray-400 py-4 text-center">No products found for "${esc(kw)}"</div>`
+      return
+    }
+    el.innerHTML = results.map(p => `
+      <div class="flex items-start gap-3 p-3 border border-gray-100 rounded-xl hover:bg-gray-50">
+        ${p.featured_image_url
+          ? `<img src="${esc(p.featured_image_url)}" class="w-12 h-12 rounded-lg object-cover shrink-0">`
+          : `<div class="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-xl shrink-0">🛍</div>`}
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-medium text-gray-800 truncate">${esc(p.title)}</div>
+          <div class="text-xs text-gray-400">${p.product_type ? esc(p.product_type)+' · ' : ''}${p.price_min != null ? p.currency+' '+p.price_min.toFixed(0) : ''}</div>
+          <a href="${esc(p.platform_url||'#')}" target="_blank" class="text-xs text-indigo-400 hover:underline">/products/${esc(p.handle)}</a>
+        </div>
+        ${p.tracked
+          ? `<span class="badge badge-green text-xs shrink-0">Tracked</span>`
+          : `<button class="btn btn-primary btn-sm shrink-0" onclick="trackProduct(${JSON.stringify(p).replace(/"/g,'&quot;')})">+ Track</button>`}
+      </div>`).join('')
+  } catch(e) {
+    if (el) el.innerHTML = `<div class="text-xs text-red-400">${esc(e.message)}</div>`
+  }
+}
+
+async function trackProduct(p) {
+  if (!S.currentShop) return
+  try {
+    await POST('/api/v1/products/track', {
+      shop_domain: S.currentShop,
+      platform_id: p.platform_id,
+      handle: p.handle,
+      title: p.title,
+      product_type: p.product_type || null,
+      platform_url: p.platform_url || null,
+    })
+    toast(`✅ Now tracking: ${p.title}`, 'success')
+    loadTrackedProducts()
+    searchLiveProducts()  // refresh tracked badges
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function loadTrackedProducts() {
+  const el = document.getElementById('prod-tracked-list')
+  const cnt = document.getElementById('prod-count')
+  if (!el) return
+  try {
+    const q = new URLSearchParams({ limit: 100, ...(S.currentShop && { shop_domain: S.currentShop }) })
+    const r = await GET(`/api/v1/products/?${q}`)
+    const items = r.items || []
+    if (cnt) cnt.textContent = `(${items.length})`
+    if (!items.length) {
+      el.innerHTML = `<div class="text-xs text-gray-400 py-6 text-center">No products tracked yet.<br>Search and add products on the left.</div>`
+      return
+    }
+    el.innerHTML = items.map(p => `
+      <div class="flex items-center gap-3 py-2.5 border-b border-gray-50 last:border-0">
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-medium text-gray-800 truncate">${esc(p.title)}</div>
+          <div class="flex items-center gap-2 mt-0.5">
+            ${p.product_type ? `<span class="text-xs text-indigo-400">${esc(p.product_type)}</span>` : ''}
+            ${p.platform_url ? `<a href="${esc(p.platform_url)}" target="_blank" class="text-xs text-gray-400 hover:underline">/products/${esc(p.handle)}</a>` : ''}
+          </div>
+          ${p.notes ? `<div class="text-xs text-gray-400 mt-0.5 italic">${esc(p.notes)}</div>` : ''}
+        </div>
+        <span class="badge ${p.status==='paused'?'badge-gray':'badge-green'} text-xs shrink-0">${p.status}</span>
+        <div class="flex gap-1 shrink-0">
+          <button class="text-xs text-gray-400 hover:text-amber-500" title="${p.status==='tracked'?'Pause':'Resume'}"
+            onclick="toggleTrackedStatus(${p.id},'${p.status==='tracked'?'paused':'tracked'}')">
+            ${p.status==='tracked'?'⏸':'▶'}
+          </button>
+          <button class="text-xs text-gray-400 hover:text-red-500" onclick="untrackProduct(${p.id})" title="Stop tracking">✕</button>
+        </div>
+      </div>`).join('')
+  } catch(e) {
+    if (el) el.innerHTML = `<div class="text-xs text-red-400">${esc(e.message)}</div>`
+  }
+}
+
+async function toggleTrackedStatus(id, newStatus) {
+  try {
+    await api('PATCH', `/api/v1/products/${id}`, { status: newStatus })
+    loadTrackedProducts()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function untrackProduct(id) {
+  if (!confirm('Stop tracking this product?')) return
+  try {
+    await DEL(`/api/v1/products/${id}`)
+    toast('Removed from tracking', 'success')
+    loadTrackedProducts()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+// ═══════════════════ BRAND PROFILE ════════════════════════
+
 async function renderBrand() {
   const shop = S.currentShop
-  document.getElementById('header-actions').innerHTML =
-    `<button class="btn btn-primary btn-sm" onclick="saveBrand()">💾 Save Profile</button>`
+  document.getElementById('header-actions').innerHTML = ''
 
-  if (!S.brandProfile) {
-    try {
-      S.brandProfile = await GET(`/api/v1/settings/brand${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
-    } catch { S.brandProfile = {} }
-  }
+  S.brandProfile = null  // always reload fresh
+  try {
+    S.brandProfile = await GET(`/api/v1/settings/brand${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
+  } catch { S.brandProfile = {} }
   const bp = S.brandProfile || {}
+  const canEdit = bp.can_edit !== false  // default true for admin (can_edit absent = admin)
+  const isAdmin = S.user?.role === 'admin'
+
+  document.getElementById('header-actions').innerHTML =
+    canEdit ? `<button class="btn btn-primary btn-sm" onclick="saveBrand()">💾 Save Profile</button>` : ''
 
   document.getElementById('content').innerHTML = `
     <div class="space-y-5 max-w-2xl">
+      ${!canEdit ? `<div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-xs text-amber-700">👁 View only — contact an admin to request edit access (<code>brand_edit</code> scope).</div>` : ''}
       <div class="card">
         <div class="font-semibold text-gray-800 mb-1">🎨 Brand Profile</div>
-        <p class="text-sm text-gray-500 mb-4">Defines how GPT-4o writes every article. Applied automatically when generating content for <strong>${esc(shop || 'all stores')}</strong>.</p>
+        <p class="text-sm text-gray-500 mb-4">Global rules applied to every article for <strong>${esc(shop || 'all stores')}</strong>. Highest priority — overrides all per-article settings.</p>
 
         <div class="space-y-4">
           <div>
             <label>Brand Name</label>
-            <input type="text" id="bp-name" value="${esc(bp.brand_name||'')}" placeholder="e.g. GingerGlow">
+            <input type="text" id="bp-name" value="${esc(bp.brand_name||'')}" placeholder="e.g. GingerGlow" ${!canEdit?'readonly':''}>
           </div>
           <div>
             <label>Brand Description <span class="text-gray-400 font-normal text-xs">— who you are, what you sell, target audience</span></label>
-            <textarea id="bp-desc" rows="3" placeholder="e.g. GingerGlow is a premium Vietnamese skincare brand targeting women 25-40 who value natural ingredients...">${esc(bp.brand_description||'')}</textarea>
+            <textarea id="bp-desc" rows="3" placeholder="e.g. GingerGlow is a premium Vietnamese skincare brand targeting women 25-40…" ${!canEdit?'readonly':''}>${esc(bp.brand_description||'')}</textarea>
           </div>
           <div>
             <label>Brand Style <span class="text-gray-400 font-normal text-xs">— keywords describing the visual/content vibe</span></label>
-            <input type="text" id="bp-style" value="${esc(bp.brand_style||'')}" placeholder="e.g. minimalist, premium, warm, educational, trustworthy">
+            <input type="text" id="bp-style" value="${esc(bp.brand_style||'')}" placeholder="e.g. minimalist, premium, warm, educational, trustworthy" ${!canEdit?'readonly':''}>
           </div>
           <div>
             <label>Tone of Voice <span class="text-gray-400 font-normal text-xs">— how articles should sound</span></label>
-            <textarea id="bp-tone" rows="3" placeholder="e.g. Write like a knowledgeable friend who genuinely cares about skincare. Be warm and reassuring, avoid jargon. Use 'you' to address the reader directly...">${esc(bp.tone_of_voice||'')}</textarea>
+            <textarea id="bp-tone" rows="3" placeholder="e.g. Write like a knowledgeable friend…" ${!canEdit?'readonly':''}>${esc(bp.tone_of_voice||'')}</textarea>
           </div>
           <div>
-            <label>Output Requirements <span class="text-gray-400 font-normal text-xs">— markdown, formatting, structure rules</span></label>
-            <textarea id="bp-output" rows="6" placeholder="e.g.
-- Always open with a relatable problem/pain point in the first paragraph
-- Use bullet points for product comparisons
-- Include a 'Pro tip' callout box in every article using &lt;div class=&quot;pro-tip&quot;&gt;
-- End every article with a CTA to shop the collection
-- Avoid making medical claims; use 'may help' instead of 'cures'">${esc(bp.output_requirements||'')}</textarea>
+            <label>Output Requirements <span class="text-gray-400 font-normal text-xs">— formatting, structure, HTML rules</span></label>
+            <textarea id="bp-output" rows="5" placeholder="e.g. Always open with a pain point…" ${!canEdit?'readonly':''}>${esc(bp.output_requirements||'')}</textarea>
           </div>
+          <div class="border border-red-200 rounded-xl p-4 bg-red-50">
+            <label class="text-red-700">⚠️ Critical Writing Notes <span class="text-red-400 font-normal text-xs">— enforced above ALL other instructions, non-negotiable</span></label>
+            <textarea id="bp-notes" rows="5" placeholder="Rules the AI must NEVER violate…"
+              class="border-red-300 focus:ring-red-400" ${!canEdit?'readonly':''}>${esc(bp.writing_notes||'')}</textarea>
+            <div class="text-xs text-red-600 mt-1">Placed at the very top of the AI system prompt — overrides everything else.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Brand editors (admin only) -->
+      <div class="card" id="brand-users-panel" style="display:none">
+        <div class="font-semibold text-gray-800 mb-1">✏️ Brand Edit Permission</div>
+        <p class="text-sm text-gray-500 mb-3">
+          Users with store access can <strong>view</strong> this brand profile.<br>
+          Grant <code class="bg-gray-100 px-1 rounded">brand_edit</code> scope in User Management to also allow <strong>editing</strong> it.
+        </p>
+        <div id="brand-editors-list">${skeletons(2)}</div>
+        <div class="text-xs text-gray-400 mt-3 bg-gray-50 rounded-lg p-3">
+          To grant edit: <strong>User Management</strong> → select user → Permissions → tick <em>brand_edit</em> → Grant Access
         </div>
       </div>
 
@@ -2812,9 +4916,11 @@ async function renderBrand() {
           <div class="flex items-center gap-3 flex-wrap">
             ${bp.gsc_connected
               ? `<span class="badge badge-green">✅ Connected</span>
-                 <button class="btn btn-secondary btn-sm" onclick="gscDisconnect()">Disconnect</button>`
-              : `<button class="btn btn-primary btn-sm" onclick="gscConnect()">🔗 Connect via Google OAuth</button>
-                 <span class="text-xs text-gray-400">Opens Google sign-in in a new tab</span>`}
+                 ${isAdmin ? `<button class="btn btn-secondary btn-sm" onclick="gscDisconnect()">Disconnect</button>` : ''}`
+              : isAdmin
+                ? `<button class="btn btn-primary btn-sm" onclick="gscConnect()">🔗 Connect via Google OAuth</button>
+                   <span class="text-xs text-gray-400">Opens Google sign-in in a new tab</span>`
+                : `<span class="text-xs text-gray-400">GSC connection managed by admin.</span>`}
           </div>
           <div class="text-xs text-amber-700 bg-amber-50 rounded-lg p-3 space-y-1">
             <div class="font-medium">⚠️ Why service account email fails ("email not found")</div>
@@ -2834,14 +4940,21 @@ async function renderBrand() {
       <div class="card bg-blue-50 border border-blue-100">
         <div class="text-sm font-medium text-blue-800 mb-1">How it works</div>
         <ul class="text-xs text-blue-700 space-y-1 list-disc list-inside">
-          <li>Profile is injected into the GPT-4o system prompt for every generated article</li>
-          <li>Store-specific profile takes priority over global profile</li>
+          <li><strong>Critical Writing Notes</strong> sit at the very top of the AI system prompt — they override all other instructions</li>
+          <li>Brand Profile is <strong>global</strong>: every generated article for this store must comply</li>
+          <li>Store-specific profile takes priority over the global default profile</li>
           <li>Tone of Voice overrides the per-article tone selector</li>
-          <li>Output Requirements give GPT-4o structural and formatting rules</li>
+          <li>Output Requirements set formatting/structure rules</li>
           <li>GSC connection scopes Search Console data to this brand's site</li>
         </ul>
       </div>
     </div>`
+
+  if (isAdmin) {
+    const panel = document.getElementById('brand-users-panel')
+    if (panel) panel.style.display = ''
+    loadBrandEditors()
+  }
 }
 
 async function saveBrand() {
@@ -2853,12 +4966,32 @@ async function saveBrand() {
     brand_style: document.getElementById('bp-style').value.trim(),
     tone_of_voice: document.getElementById('bp-tone').value.trim(),
     output_requirements: document.getElementById('bp-output').value.trim(),
+    writing_notes: document.getElementById('bp-notes')?.value.trim() || '',
     gsc_site_url: document.getElementById('bp-gsc-url')?.value.trim() || null,
   }
   try {
     S.brandProfile = await PUT('/api/v1/settings/brand', body)
     toast('Brand profile saved!', 'success')
   } catch(e) { toast('Save failed: ' + e.message, 'error') }
+}
+
+async function loadBrandEditors() {
+  const shop = S.currentShop
+  const el = document.getElementById('brand-editors-list')
+  if (!el) return
+  try {
+    const editors = await GET(`/api/v1/settings/brand/editors${shop ? '?shop_domain='+encodeURIComponent(shop) : ''}`)
+    el.innerHTML = editors.length === 0
+      ? '<div class="text-xs text-gray-400">No users have brand_edit permission yet.</div>'
+      : editors.map(u => `
+          <div class="flex items-center py-2 border-b border-gray-50 last:border-0 gap-3">
+            <div class="text-sm font-medium text-gray-800">${esc(u.name||u.email)}</div>
+            <div class="text-xs text-gray-400">${esc(u.email)}</div>
+            <span class="badge badge-indigo text-xs ml-auto">brand_edit</span>
+          </div>`).join('')
+  } catch(e) {
+    if (el) el.innerHTML = `<div class="text-xs text-red-400">${esc(e.message)}</div>`
+  }
 }
 
 async function gscConnect() {
@@ -2967,7 +5100,7 @@ async function loadUsersTable() {
                 </td>
                 <td class="py-3 px-3">
                   <div class="flex gap-1 action-btns flex-wrap">
-                    <button class="btn btn-secondary btn-sm" onclick="openPermModal(${u.id},'${esc(u.name)}',${JSON.stringify(u.store_permissions||[])})">🔑 Permissions</button>
+                    <button class="btn btn-secondary btn-sm" onclick="openPermModal(${u.id},'${esc(u.name)}',${esc(JSON.stringify(u.store_permissions||[]))})">🔑 Permissions</button>
                     <button class="btn btn-secondary btn-sm" onclick="toggleUserActive(${u.id},${!u.is_active})">${u.is_active?'Disable':'Enable'}</button>
                     ${u.role !== 'admin' ? `<button class="btn btn-sm" style="${u.can_access_kb?'background:#dcfce7;color:#166534':'background:#f3f4f6;color:#374151'}" title="${u.can_access_kb?'Revoke KB access':'Grant KB access'}" onclick="toggleKbAccess(${u.id})">${u.can_access_kb?'🧠 KB ✓':'🧠 KB'}</button>` : ''}
                     ${u.id !== S.user?.id ? `<button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id},'${esc(u.name)}')">×</button>` : ''}
@@ -3014,7 +5147,7 @@ async function doCreateUser() {
 
 function openPermModal(userId, userName, currentPerms) {
   const stores = S.myStores.map(s => s.shop_domain)
-  const scopeOpts = ['read', 'write', 'publish', 'audit']
+  const scopeOpts = ['read', 'write', 'publish', 'audit', 'brand_edit']
   const existingByShop = {}
   currentPerms.forEach(p => { existingByShop[p.shop_domain] = p.scopes || [] })
 
@@ -3040,6 +5173,7 @@ function openPermModal(userId, userName, currentPerms) {
           <div><strong>audit</strong> — run audits, keyword research</div>
           <div><strong>write</strong> — generate articles</div>
           <div><strong>publish</strong> — publish to Shopify</div>
+          <div><strong>brand_edit</strong> — edit the store's brand profile</div>
         </div>
       </div>
       <div id="current-perms">

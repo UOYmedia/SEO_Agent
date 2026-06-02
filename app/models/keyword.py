@@ -38,6 +38,7 @@ class Keyword(Base):
 
     # Related article
     article_id = Column(Integer, ForeignKey("blog_posts.id"), nullable=True)
+    topic_cluster_id = Column(Integer, ForeignKey("topic_clusters.id"), nullable=True, index=True)
 
     # PAA questions from SERP (list of str)
     people_also_ask = Column(JSON, default=list)
@@ -47,6 +48,7 @@ class Keyword(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     article = relationship("BlogPost", foreign_keys=[article_id])
+    cluster = relationship("TopicCluster", back_populates="keywords", foreign_keys=[topic_cluster_id])
 
 
 class TopicCluster(Base):
@@ -57,6 +59,9 @@ class TopicCluster(Base):
     seed_keyword = Column(String(500), nullable=False)
     cluster_name = Column(String(500))
     description = Column(Text)
+
+    # Full AI-generated plan (pillar + supporting_articles JSON)
+    plan_json = Column(JSON)
 
     # Pillar article
     pillar_article_id = Column(Integer, ForeignKey("blog_posts.id"), nullable=True)
@@ -72,6 +77,7 @@ class TopicCluster(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     pillar_article = relationship("BlogPost", foreign_keys=[pillar_article_id])
+    keywords = relationship("Keyword", back_populates="cluster", foreign_keys="[Keyword.topic_cluster_id]")
 
 
 class AuditSnapshot(Base):

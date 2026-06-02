@@ -73,7 +73,140 @@ def get_topic_cluster(cluster_id: int, db: Session = Depends(get_db)):
     cluster = db.query(TopicCluster).filter(TopicCluster.id == cluster_id).first()
     if not cluster:
         raise HTTPException(status_code=404, detail="Topic cluster not found")
-    return cluster
+    result = {
+        "id": cluster.id,
+        "seed_keyword": cluster.seed_keyword,
+        "cluster_name": cluster.cluster_name,
+        "status": cluster.status,
+        "created_at": cluster.created_at,
+        "questions": cluster.questions or [],
+    }
+    if cluster.plan_json:
+        import json as _json
+        try:
+            plan = cluster.plan_json if isinstance(cluster.plan_json, dict) else _json.loads(cluster.plan_json)
+            result.update(plan)
+            result["id"] = cluster.id  # ensure id not overwritten
+        except Exception:
+            pass
+    else:
+        import json as _json
+        try:
+            result["pillar"] = _json.loads(cluster.description or "{}")
+        except Exception:
+            result["pillar"] = {}
+        result["supporting_articles"] = []
+    return result
+
+
+from pydantic import BaseModel as _PydBase
+
+
+class _AddKeywordBody(_PydBase):
+    keyword: str
+    country: str = "vn"
+    language: str = "vi"
+
+
+@topics_router.get("/{cluster_id}/keywords")
+def list_cluster_keywords(cluster_id: int, db: Session = Depends(get_db)):
+    from app.models.keyword import Keyword
+    if not db.query(TopicCluster).filter(TopicCluster.id == cluster_id).first():
+        raise HTTPException(404, "Cluster not found")
+    kws = db.query(Keyword).filter(Keyword.topic_cluster_id == cluster_id).all()
+    return [
+        {
+            "id": k.id,
+            "keyword": k.keyword,
+            "current_rank": k.current_rank,
+            "prev_rank": k.prev_rank,
+            "volume": k.volume,
+            "difficulty": k.difficulty,
+            "cpc": k.cpc,
+            "country": k.country,
+            "language": k.language,
+            "status": k.status,
+            "last_checked": k.last_checked,
+        }
+        for k in kws
+    ]
+
+
+@topics_router.post("/{cluster_id}/keywords")
+async def add_cluster_keyword(cluster_id: int, body: _AddKeywordBody, db: Session = Depends(get_db)):
+    from app.models.keyword import Keyword, KeywordStatus
+    if not db.query(TopicCluster).filter(TopicCluster.id == cluster_id).first():
+        raise HTTPException(404, "Cluster not found")
+    kw_text = body.keyword.strip()
+    existing = db.query(Keyword).filter_by(topic_cluster_id=cluster_id, keyword=kw_text).first()
+    if existing:
+        return {"id": existing.id, "keyword": existing.keyword, "volume": existing.volume,
+                "cpc": existing.cpc, "already_exists": True}
+    kw = Keyword(
+        keyword=kw_text,
+        topic_cluster_id=cluster_id,
+        country=body.country,
+        language=body.language,
+        status=KeywordStatus.TRACKED,
+    )
+    db.add(kw)
+    db.commit()
+    db.refresh(kw)
+
+    # Auto-fetch search volume from DataForSEO if configured
+    from app.services.volume_service import get_search_volumes
+    lang = (body.language or "en")[:2].lower()
+    vol_data = await get_search_volumes([kw_text], language_code=lang)
+    if vol_data.get(kw_text):
+        v = vol_data[kw_text]
+        kw.volume = v.get("volume")
+        kw.difficulty = round((v.get("competition") or 0) * 100, 1)  # 0–100 scale
+        kw.cpc = v.get("cpc")
+        db.commit()
+        db.refresh(kw)
+
+    return {
+        "id": kw.id, "keyword": kw.keyword,
+        "country": kw.country, "language": kw.language,
+        "volume": kw.volume, "difficulty": kw.difficulty, "cpc": kw.cpc,
+    }
+
+
+class _PatchKeywordBody(_PydBase):
+    volume: Optional[int] = None
+    difficulty: Optional[float] = None
+    cpc: Optional[float] = None
+    current_rank: Optional[int] = None
+
+
+@topics_router.patch("/{cluster_id}/keywords/{kw_id}")
+def update_cluster_keyword(cluster_id: int, kw_id: int, body: _PatchKeywordBody, db: Session = Depends(get_db)):
+    from app.models.keyword import Keyword
+    kw = db.query(Keyword).filter_by(id=kw_id, topic_cluster_id=cluster_id).first()
+    if not kw:
+        raise HTTPException(404, "Keyword not found")
+    if body.volume is not None:
+        kw.volume = body.volume
+    if body.difficulty is not None:
+        kw.difficulty = body.difficulty
+    if body.cpc is not None:
+        kw.cpc = body.cpc
+    if body.current_rank is not None:
+        kw.prev_rank = kw.current_rank
+        kw.current_rank = body.current_rank
+    db.commit()
+    return {"id": kw.id, "keyword": kw.keyword, "volume": kw.volume, "cpc": kw.cpc, "difficulty": kw.difficulty}
+
+
+@topics_router.delete("/{cluster_id}/keywords/{kw_id}")
+def remove_cluster_keyword(cluster_id: int, kw_id: int, db: Session = Depends(get_db)):
+    from app.models.keyword import Keyword
+    kw = db.query(Keyword).filter_by(id=kw_id, topic_cluster_id=cluster_id).first()
+    if not kw:
+        raise HTTPException(404, "Keyword not found")
+    db.delete(kw)
+    db.commit()
+    return {"deleted": kw_id}
 
 
 # ── Content Generation ────────────────────────────────────────────────────────
@@ -135,6 +268,7 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
                 "brand_description": bp.brand_description,
                 "tone_of_voice": bp.tone_of_voice,
                 "output_requirements": bp.output_requirements,
+                "writing_notes": getattr(bp, "writing_notes", None),
             }
     except Exception:
         pass
@@ -179,6 +313,7 @@ async def generate_article(body: GenerateArticleRequest, db: Session = Depends(g
         notes=body.notes,
         market=body.market,
         article_type=body.article_type,
+        target_platform=body.target_platform or "google",
     )
 
     # Save draft to DB
@@ -278,6 +413,7 @@ async def rewrite_article(
             "brand_name": bp.brand_name, "brand_style": bp.brand_style,
             "brand_description": bp.brand_description, "tone_of_voice": bp.tone_of_voice,
             "output_requirements": bp.output_requirements,
+            "writing_notes": getattr(bp, "writing_notes", None),
         }
 
     # Load feedback lessons

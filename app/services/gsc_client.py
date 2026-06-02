@@ -163,6 +163,34 @@ class GscClient:
                  "impressions": int(r.get("impressions", 0))}
                 for r in data.get("rows", [])]
 
+    def get_keyword_history(self, keyword: str, days: int = 90) -> list[dict]:
+        """Daily GSC metrics for a single keyword over the last N days."""
+        start, end = self._date_range(days)
+        data = self._query({
+            "startDate": start,
+            "endDate":   end,
+            "dimensions": ["date"],
+            "dimensionFilterGroups": [{
+                "filters": [{
+                    "dimension":  "query",
+                    "operator":   "equals",
+                    "expression": keyword,
+                }]
+            }],
+            "rowLimit": days,
+            "orderBy": [{"fieldName": "date", "sortOrder": "ASCENDING"}],
+        })
+        return [
+            {
+                "date":        r["keys"][0],
+                "clicks":      int(r.get("clicks", 0)),
+                "impressions": int(r.get("impressions", 0)),
+                "ctr":         round(r.get("ctr", 0.0), 4),
+                "position":    round(r.get("position", 0.0), 1),
+            }
+            for r in data.get("rows", [])
+        ]
+
 
 # ── Module-level helpers (backwards compat + brand lookup) ────────────────────
 

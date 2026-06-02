@@ -43,6 +43,7 @@ class BrandProfileBody(BaseModel):
     brand_description: Optional[str] = None
     tone_of_voice: Optional[str] = None
     output_requirements: Optional[str] = None
+    writing_notes: Optional[str] = None
     gsc_site_url: Optional[str] = None
 
 
@@ -54,10 +55,38 @@ def _profile_out(p: BrandProfile) -> dict:
         "brand_description": p.brand_description or "",
         "tone_of_voice": p.tone_of_voice or "",
         "output_requirements": p.output_requirements or "",
+        "writing_notes": p.writing_notes or "",
         "gsc_site_url": p.gsc_site_url or "",
         "gsc_connected": bool(p.gsc_refresh_token),
+        "shared_user_ids": p.shared_user_ids or [],
         "updated_at": p.updated_at,
     }
+
+
+def _can_view_brand(user, shop_domain: Optional[str], db: Session) -> bool:
+    """User can view a brand profile if they have any store access (or are admin)."""
+    if user.role == "admin":
+        return True
+    if shop_domain is None:
+        return True  # global profile visible to all
+    from app.models.user import UserStorePermission
+    perm = db.query(UserStorePermission).filter_by(
+        user_id=user.id, shop_domain=shop_domain
+    ).first()
+    return perm is not None
+
+
+def _can_edit_brand(user, shop_domain: Optional[str], db: Session) -> bool:
+    """User can edit a brand profile if they are admin or have brand_edit scope."""
+    if user.role == "admin":
+        return True
+    if shop_domain is None:
+        return False  # only admin can edit the global profile
+    from app.models.user import UserStorePermission
+    perm = db.query(UserStorePermission).filter_by(
+        user_id=user.id, shop_domain=shop_domain
+    ).first()
+    return perm is not None and "brand_edit" in (perm.scopes or [])
 
 
 @settings_router.get("/brands")
@@ -65,7 +94,18 @@ def list_brand_profiles(
     user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    profiles = db.query(BrandProfile).order_by(BrandProfile.brand_name).all()
+    """Admins see all brands. Non-admins see brands for their accessible stores."""
+    if user.role == "admin":
+        profiles = db.query(BrandProfile).order_by(BrandProfile.brand_name).all()
+    else:
+        from app.services.auth_service import get_user_shops
+        user_shops = set(get_user_shops(user, db))
+        all_profiles = db.query(BrandProfile).all()
+        profiles = [
+            p for p in all_profiles
+            if p.shop_domain is None or (p.shop_domain and p.shop_domain in user_shops)
+        ]
+        profiles.sort(key=lambda p: p.brand_name or "")
     return [_profile_out(p) for p in profiles]
 
 
@@ -75,18 +115,21 @@ def get_brand_profile(
     user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if not _can_view_brand(user, shop_domain, db):
+        raise HTTPException(403, "No access to this store's brand profile")
     profile = db.query(BrandProfile).filter_by(shop_domain=shop_domain).first()
     if not profile:
         return {
             "shop_domain": shop_domain,
-            "brand_name": "",
-            "brand_style": "",
-            "brand_description": "",
-            "tone_of_voice": "",
-            "output_requirements": "",
+            "brand_name": "", "brand_style": "", "brand_description": "",
+            "tone_of_voice": "", "output_requirements": "", "writing_notes": "",
+            "gsc_site_url": "", "gsc_connected": False, "shared_user_ids": [],
+            "can_edit": _can_edit_brand(user, shop_domain, db),
             "updated_at": None,
         }
-    return _profile_out(profile)
+    out = _profile_out(profile)
+    out["can_edit"] = _can_edit_brand(user, shop_domain, db)
+    return out
 
 
 @settings_router.put("/brand")
@@ -95,6 +138,8 @@ def save_brand_profile(
     user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if not _can_edit_brand(user, body.shop_domain, db):
+        raise HTTPException(403, "You don't have brand_edit permission for this store")
     profile = db.query(BrandProfile).filter_by(shop_domain=body.shop_domain).first()
     if not profile:
         profile = BrandProfile(shop_domain=body.shop_domain)
@@ -110,12 +155,42 @@ def save_brand_profile(
         profile.tone_of_voice = body.tone_of_voice
     if body.output_requirements is not None:
         profile.output_requirements = body.output_requirements
+    if body.writing_notes is not None:
+        profile.writing_notes = body.writing_notes
     if body.gsc_site_url is not None:
         profile.gsc_site_url = body.gsc_site_url or None
 
     db.commit()
     db.refresh(profile)
     return _profile_out(profile)
+
+
+# ── Brand profile — who has edit access (admin view) ─────────────────────────
+
+@settings_router.get("/brand/editors")
+def list_brand_editors(
+    shop_domain: Optional[str] = Query(None),
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return users who have brand_edit scope on this store (admin only)."""
+    if user.role != "admin":
+        raise HTTPException(403, "Admin only")
+    from app.models.user import User, UserStorePermission
+    if shop_domain:
+        perms = (
+            db.query(UserStorePermission)
+            .filter(
+                UserStorePermission.shop_domain == shop_domain,
+                UserStorePermission.scopes.contains("brand_edit"),
+            )
+            .all()
+        )
+        user_ids = [p.user_id for p in perms]
+    else:
+        user_ids = []
+    editors = db.query(User).filter(User.id.in_(user_ids)).all() if user_ids else []
+    return [{"id": u.id, "name": u.name or u.email, "email": u.email} for u in editors]
 
 
 # ── Shopify OAuth credentials ─────────────────────────────────────────────────

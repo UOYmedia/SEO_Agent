@@ -61,17 +61,26 @@ class BlogPost(Base):
     seo_title = Column(Text)
     seo_description = Column(Text)
     focus_keyword = Column(String(500))
+    shop_domain = Column(String(255), index=True)   # store this post belongs to
     image_prompt = Column(Text)          # DALL-E prompt stored at generation time
     extra_images = Column(JSON, default=list)  # [{label, prompt, url}]
 
     # Internal links inserted (list of target post IDs)
     internal_links = Column(JSON, default=list)
 
+    # Semantic/LSI keywords identified by the AI writer
+    semantic_keywords = Column(JSON, default=list)   # list[str]
+
     # State
     status = Column(Enum(PostStatus), default=PostStatus.PUBLISHED)
     source = Column(String(50), default="synced")        # 'synced' | 'generated'
+    created_at = Column(DateTime, default=datetime.utcnow)
     published_at = Column(DateTime)
     synced_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Scheduling
+    scheduled_at = Column(DateTime, nullable=True)
+    scheduled_blog_id = Column(String(100), nullable=True)
 
     channel = relationship("BlogChannel", back_populates="posts")

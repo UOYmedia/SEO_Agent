@@ -1,6 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -97,7 +98,17 @@ def list_posts(
     db: Session = Depends(get_db),
 ):
     """List synced/generated blog posts for the active store (or all the user can access)."""
-    q = _scope_shop_filter(db.query(BlogPost), BlogPost, shop_domain, user, db)
+    if shop_domain:
+        # Auth check + match explicit shop_domain OR legacy posts whose platform_url contains the domain
+        check_store_scope(user, shop_domain, "read", db)
+        q = db.query(BlogPost).filter(
+            or_(
+                BlogPost.shop_domain == shop_domain,
+                BlogPost.platform_url.like(f"%{shop_domain}%"),
+            )
+        )
+    else:
+        q = _scope_shop_filter(db.query(BlogPost), BlogPost, None, user, db)
 
     if platform:
         q = q.filter(BlogPost.platform == platform)
@@ -110,7 +121,7 @@ def list_posts(
         )
 
     total = q.count()
-    posts = q.order_by(BlogPost.published_at.desc()).offset((page - 1) * limit).limit(limit).all()
+    posts = q.order_by(BlogPost.updated_at.desc().nullslast(), BlogPost.id.desc()).offset((page - 1) * limit).limit(limit).all()
     total_pages = (total + limit - 1) // limit if total else 0
     return PaginatedPosts(items=posts, total=total, page=page, limit=limit, total_pages=total_pages)
 

@@ -43,5 +43,21 @@ class RankingChecker:
 
     async def check_many(self, keywords: list[str]) -> list[dict]:
         import asyncio
-        tasks = [self.check_keyword(kw) for kw in keywords]
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*[self.check_keyword(kw) for kw in keywords])
+
+        # Enrich with search volume if DataForSEO is configured
+        from app.services.volume_service import get_search_volumes, is_configured
+        volumes = {}
+        if is_configured():
+            try:
+                volumes = await get_search_volumes(keywords)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("Volume fetch failed: %s", exc)
+        for r in results:
+            vol_data = volumes.get(r["keyword"], {})
+            r["volume"] = vol_data.get("volume")
+            r["competition"] = vol_data.get("competition")
+            r["cpc"] = vol_data.get("cpc")
+
+        return list(results)

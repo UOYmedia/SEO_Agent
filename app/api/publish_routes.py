@@ -3,11 +3,15 @@ Publish drafts to Shopify. Image generation happens during article
 creation or draft editing — NOT here.
 
 Routes:
-  POST /api/v1/publish/{post_id}/shopify  — publish (uses post.featured_image_url)
+  POST /api/v1/publish/{post_id}/shopify   — publish immediately
+  POST /api/v1/publish/{post_id}/schedule  — schedule for later
+  DELETE /api/v1/publish/{post_id}/schedule — cancel schedule
 """
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -38,8 +42,10 @@ async def publish_to_shopify(
     body: PublishToShopifyRequest,
     db: Session = Depends(get_db),
 ):
-    """Publish a draft to Shopify. Uses the post's existing featured_image_url
-    (generated at draft time). Does not call DALL-E."""
+    """Publish or re-publish a post to Shopify.
+    - Draft with no platform_id → creates new Shopify article
+    - Draft/published with platform_id → updates existing Shopify article in-place
+    Uses existing featured_image_url; does not call DALL-E."""
     post = _get_post_or_404(post_id, db)
 
     publisher = ShopifyPublisher(shop_domain=body.shop_domain, db=db)
@@ -66,3 +72,43 @@ async def publish_to_shopify(
         "status": updated.status,
         "image_uploaded": bool(post.featured_image_url),
     }
+
+
+class _ScheduleBody(BaseModel):
+    scheduled_at: datetime
+    shop_domain: str
+    blog_id: int
+
+
+@publish_router.post("/{post_id}/schedule")
+def schedule_post(
+    post_id: int,
+    body: _ScheduleBody,
+    db: Session = Depends(get_db),
+):
+    """Schedule a draft post to auto-publish at a future datetime (UTC)."""
+    post = _get_post_or_404(post_id, db)
+    from app.models.blog_post import PostStatus
+    if post.status != PostStatus.DRAFT:
+        raise HTTPException(422, "Only draft posts can be scheduled")
+    post.scheduled_at = body.scheduled_at
+    post.scheduled_blog_id = str(body.blog_id)
+    if body.shop_domain:
+        post.shop_domain = body.shop_domain
+    db.commit()
+    return {
+        "post_id": post.id,
+        "scheduled_at": post.scheduled_at,
+        "scheduled_blog_id": post.scheduled_blog_id,
+        "shop_domain": post.shop_domain,
+    }
+
+
+@publish_router.delete("/{post_id}/schedule")
+def cancel_schedule(post_id: int, db: Session = Depends(get_db)):
+    """Cancel a scheduled post — it remains as a draft."""
+    post = _get_post_or_404(post_id, db)
+    post.scheduled_at = None
+    post.scheduled_blog_id = None
+    db.commit()
+    return {"post_id": post.id, "scheduled_at": None}

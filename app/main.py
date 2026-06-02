@@ -12,6 +12,10 @@ from app.api.auth_routes import auth_router
 from app.api.content_routes import generate_router, research_router, topics_router
 from app.api.init_routes import blog_router, router as init_router
 from app.api.knowledge_routes import knowledge_router
+from app.api.tracking_routes import tracking_router
+from app.api.trends_routes import trends_router
+from app.api.agent_routes import agent_router
+from app.api.product_routes import product_router
 from app.api.publish_routes import publish_router
 from app.api.settings_routes import settings_router
 from app.api.user_routes import user_router
@@ -24,6 +28,10 @@ from app.models import article_edit_history as _aeh  # ensure article_edit_histo
 from app.models import knowledge_item as _ki       # ensure knowledge_items table is registered
 from app.models import crawl_job as _cj            # ensure crawl_jobs table is registered
 from app.models import system_settings as _ss      # ensure system_settings table is registered
+from app.models import product as _prod            # ensure products table is registered
+from app.models import platform_guideline as _pg   # ensure platform_guidelines table is registered
+from app.models import keyword_follow as _kf       # ensure keyword_follows/keyword_history tables
+from app.models import pipeline_run as _pr        # ensure pipeline_runs table is registered
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +47,17 @@ async def lifespan(app: FastAPI):
         _bootstrap_superadmin()
     except Exception as e:
         logger.error(f"Superadmin bootstrap failed: {e}", exc_info=True)
+    try:
+        _seed_platform_guidelines()
+    except Exception as e:
+        logger.error(f"Platform guidelines seed failed: {e}", exc_info=True)
+    from app.services import scheduler as _sched
+    try:
+        _sched.start()
+    except Exception as e:
+        logger.error(f"Scheduler start failed: {e}", exc_info=True)
     yield
+    _sched.stop()
 
 
 def _bootstrap_superadmin():
@@ -67,6 +85,16 @@ def _bootstrap_superadmin():
     except Exception as e:
         logger.warning(f"Superadmin bootstrap failed: {e}")
         db.rollback()
+    finally:
+        db.close()
+
+
+def _seed_platform_guidelines():
+    from app.database import SessionLocal
+    from app.services.platform_guidelines import seed_platform_guidelines
+    db = SessionLocal()
+    try:
+        seed_platform_guidelines(db)
     finally:
         db.close()
 
@@ -102,9 +130,13 @@ app.include_router(blog_router)
 app.include_router(research_router)
 app.include_router(topics_router)
 app.include_router(generate_router)
+app.include_router(product_router)
 app.include_router(publish_router)
 app.include_router(settings_router)
 app.include_router(knowledge_router)
+app.include_router(tracking_router)
+app.include_router(trends_router)
+app.include_router(agent_router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
