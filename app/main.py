@@ -32,6 +32,7 @@ from app.models import product as _prod            # ensure products table is re
 from app.models import platform_guideline as _pg   # ensure platform_guidelines table is registered
 from app.models import keyword_follow as _kf       # ensure keyword_follows/keyword_history tables
 from app.models import pipeline_run as _pr        # ensure pipeline_runs table is registered
+from app.models import user_activity as _ual      # ensure user_activity_logs table is registered
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,10 @@ async def lifespan(app: FastAPI):
         logger.info("Database tables ready")
     except Exception as e:
         logger.error(f"DB table creation failed: {e}", exc_info=True)
+    try:
+        _migrate_user_columns()
+    except Exception as e:
+        logger.warning(f"User column migration failed: {e}")
     try:
         _bootstrap_superadmin()
     except Exception as e:
@@ -58,6 +63,34 @@ async def lifespan(app: FastAPI):
         logger.error(f"Scheduler start failed: {e}", exc_info=True)
     yield
     _sched.stop()
+
+
+def _migrate_user_columns():
+    """Add new columns to users table for deployments that pre-date them."""
+    from sqlalchemy import inspect, text
+    from app.database import engine
+
+    try:
+        inspector = inspect(engine)
+        existing = {col["name"] for col in inspector.get_columns("users")}
+    except Exception:
+        existing = set()
+
+    ts_type = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+
+    for col, typedef in [
+        ("last_login_at", ts_type),
+        ("login_count",   "INTEGER DEFAULT 0"),
+    ]:
+        if col in existing:
+            continue
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {typedef}"))
+                conn.commit()
+            logger.info("Migration: added column users.%s", col)
+        except Exception as exc:
+            logger.warning("Migration: could not add column users.%s: %s", col, exc)
 
 
 def _bootstrap_superadmin():

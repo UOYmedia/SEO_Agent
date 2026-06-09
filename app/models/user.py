@@ -17,6 +17,8 @@ class User(Base):
     is_active      = Column(Boolean, default=True)
     can_access_kb  = Column(Boolean, default=False)         # admin can grant KB access
     created_at     = Column(DateTime, default=datetime.utcnow)
+    last_login_at  = Column(DateTime, nullable=True)
+    login_count    = Column(Integer,  default=0)
 
     store_permissions = relationship(
         "UserStorePermission",

@@ -116,7 +116,8 @@ label { display: block; font-size: 13px; font-weight: 500; color: rgb(55 65 81);
     <a class="nav-link" data-page="brand"     onclick="nav('brand')">🎨 Brand Profile</a>
     <div id="admin-nav" class="hidden">
       <div class="border-t border-indigo-900 my-2"></div>
-      <a class="nav-link" data-page="users" onclick="nav('users')">👥 Users</a>
+      <a class="nav-link" data-page="users"    onclick="nav('users')">👥 Users</a>
+      <a class="nav-link" data-page="activity" onclick="nav('activity')">📊 Activity</a>
     </div>
   </nav>
 
@@ -258,9 +259,9 @@ function nav(page) {
   S.page = page
   document.querySelectorAll('.nav-link').forEach(el =>
     el.classList.toggle('active', el.dataset.page === page))
-  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', trends: 'Market Trends', pipeline: '🤖 AI Pipeline', knowledge: 'Knowledge Base', users: 'User Management', brand: 'Brand Profile', products: 'Products KB' }
+  const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', trends: 'Market Trends', pipeline: '🤖 AI Pipeline', knowledge: 'Knowledge Base', users: 'User Management', activity: '📊 Activity Report', brand: 'Brand Profile', products: 'Products KB' }
   document.getElementById('page-title').textContent = titles[page] || page
-  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, trends: renderTrends, pipeline: renderPipeline, knowledge: renderKnowledge, users: renderUsers, brand: renderBrand, products: renderProducts }
+  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, trends: renderTrends, pipeline: renderPipeline, knowledge: renderKnowledge, users: renderUsers, activity: renderActivity, brand: renderBrand, products: renderProducts }
   pages[page]?.()
 }
 
@@ -5032,6 +5033,162 @@ async function gscDisconnect() {
     renderBrand()
     toast('GSC disconnected', 'success')
   } catch(e) { toast('Disconnect failed: ' + e.message, 'error') }
+}
+
+// ══════════════════════ ACTIVITY REPORT ══════════════════════
+async function renderActivity() {
+  if (!S.user || S.user.role !== 'admin') {
+    document.getElementById('content').innerHTML = '<div class="card text-center text-gray-400 py-10">Admin access required</div>'
+    return
+  }
+  document.getElementById('header-actions').innerHTML =
+    `<select id="act-days" class="input" style="width:auto;padding:4px 8px;font-size:12px" onchange="renderActivity()">
+       <option value="7">Last 7 days</option>
+       <option value="30" selected>Last 30 days</option>
+       <option value="90">Last 90 days</option>
+     </select>`
+  const days = document.getElementById('act-days')?.value || 30
+  const el = document.getElementById('content')
+  el.innerHTML = `<div class="flex items-center justify-center py-20"><div class="spinner-dark"></div></div>`
+  try {
+    const r = await GET(`/api/v1/users/admin/activity-report?days=${days}`)
+    const s = r.summary || {}
+    const fmt = d => d ? new Date(d).toLocaleString() : '—'
+    const fmtDate = d => d ? new Date(d).toLocaleDateString() : '—'
+
+    const statCard = (icon, label, val, sub='', color='') =>
+      `<div class="card p-4 text-center">
+         <div class="text-2xl font-bold ${color||'text-gray-800'}">${val}</div>
+         <div class="text-xs text-gray-500 mt-0.5">${icon} ${label}</div>
+         ${sub ? `<div class="text-xs text-gray-400 mt-0.5">${sub}</div>` : ''}
+       </div>`
+
+    const errorRateColor = s.error_rate_pct > 20 ? 'text-red-600' : s.error_rate_pct > 5 ? 'text-orange-500' : 'text-green-600'
+
+    el.innerHTML = `
+    <div class="space-y-6">
+
+      <!-- Summary row -->
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        ${statCard('👥','Total Users', s.total_users)}
+        ${statCard('🟢','Active (7d)', s.active_last_7_days, `of ${s.total_users} users`)}
+        ${statCard('🤖','Pipeline Runs', s.total_pipelines, `last ${r.period_days}d`)}
+        ${statCard('❌','Errors', s.failed_pipelines, `${s.error_rate_pct}% error rate`, errorRateColor)}
+        ${statCard('📝','Articles', s.total_articles, `generated`)}
+      </div>
+
+      <!-- Users breakdown -->
+      <div class="card overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+          <h3 class="font-semibold text-gray-800 text-sm">👤 Users — last ${r.period_days} days</h3>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="border-b border-gray-100 text-xs text-gray-400 uppercase">
+              <th class="text-left px-4 py-2">User</th>
+              <th class="text-left px-4 py-2">Role</th>
+              <th class="text-left px-4 py-2">Last Login</th>
+              <th class="text-center px-3 py-2">Logins</th>
+              <th class="text-center px-3 py-2">Pipelines</th>
+              <th class="text-center px-3 py-2">Errors</th>
+              <th class="text-center px-3 py-2">Articles</th>
+              <th class="text-center px-3 py-2">Published</th>
+              <th class="text-center px-3 py-2">Edits</th>
+              <th class="text-left px-3 py-2">Stores</th>
+            </tr></thead>
+            <tbody>
+              ${(r.users||[]).map(u => {
+                const st = u.stats || {}
+                const storeLabel = u.stores?.includes('*all*') ? '<span class="badge badge-purple text-xs">All stores</span>'
+                  : (u.stores||[]).map(s => `<span class="badge text-xs" style="background:#f3f4f6;color:#374151">${esc(s.replace('.myshopify.com',''))}</span>`).join(' ')
+                const errBadge = st.pipeline_errors > 0
+                  ? `<span class="font-semibold text-red-600">${st.pipeline_errors}</span>`
+                  : `<span class="text-gray-400">0</span>`
+                const loginBadge = u.login_count_period > 0
+                  ? `<span class="font-semibold text-blue-600">${u.login_count_period}</span>`
+                  : `<span class="text-gray-300">0</span>`
+                const activeDot = u.last_login_at && new Date(u.last_login_at) > new Date(Date.now()-7*864e5)
+                  ? '<span class="inline-block w-2 h-2 bg-green-400 rounded-full mr-1" title="Active this week"></span>' : ''
+                return `<tr class="border-b border-gray-50 hover:bg-gray-50">
+                  <td class="px-4 py-2.5">
+                    <div class="font-medium text-gray-800">${activeDot}${esc(u.name)}</div>
+                    <div class="text-xs text-gray-400">${esc(u.email)}</div>
+                  </td>
+                  <td class="px-4 py-2.5">
+                    <span class="badge ${u.role==='admin'?'badge-purple':'badge-blue'}">${u.role==='admin'?'👑 Admin':'👤 Member'}</span>
+                    ${!u.is_active ? '<span class="badge text-xs" style="background:#fee2e2;color:#dc2626">Disabled</span>' : ''}
+                  </td>
+                  <td class="px-4 py-2.5 text-xs text-gray-500">${fmt(u.last_login_at)}</td>
+                  <td class="px-3 py-2.5 text-center">${loginBadge}</td>
+                  <td class="px-3 py-2.5 text-center text-gray-700">${st.pipeline_runs||0}</td>
+                  <td class="px-3 py-2.5 text-center">${errBadge}</td>
+                  <td class="px-3 py-2.5 text-center text-gray-700">${st.articles_generated||0}</td>
+                  <td class="px-3 py-2.5 text-center text-gray-700">${st.articles_published||0}</td>
+                  <td class="px-3 py-2.5 text-center text-gray-700">${st.edits_made||0}</td>
+                  <td class="px-3 py-2.5">${storeLabel||'<span class="text-gray-300 text-xs">—</span>'}</td>
+                </tr>`
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <!-- Recent errors -->
+        <div class="card overflow-hidden">
+          <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h3 class="font-semibold text-gray-800 text-sm">🚨 Recent Errors <span class="text-xs text-gray-400">(last 7d)</span></h3>
+            <span class="text-xs font-semibold ${(r.recent_errors||[]).length > 0 ? 'text-red-600' : 'text-green-600'}">${(r.recent_errors||[]).length} failures</span>
+          </div>
+          <div class="p-4 space-y-2 max-h-80 overflow-y-auto">
+            ${(r.recent_errors||[]).length ? (r.recent_errors||[]).map(e => `
+              <div class="p-2.5 bg-red-50 border border-red-100 rounded-lg text-xs">
+                <div class="flex items-center justify-between mb-1">
+                  <span class="font-semibold text-red-700">Pipeline #${e.id} — ${esc(e.keyword||'')}</span>
+                  <span class="text-gray-400">${fmt(e.created_at)}</span>
+                </div>
+                <div class="text-gray-500 text-xs mb-1">${esc(e.shop_domain||'')}</div>
+                <div class="text-red-600 font-mono text-xs break-all">${esc((e.error||'').substring(0,200))}</div>
+              </div>`).join('') :
+              '<div class="text-center text-gray-400 py-8">✅ No errors in the last 7 days</div>'
+            }
+          </div>
+        </div>
+
+        <!-- Activity feed -->
+        <div class="card overflow-hidden">
+          <div class="px-4 py-3 border-b border-gray-100">
+            <h3 class="font-semibold text-gray-800 text-sm">⚡ Activity Feed <span class="text-xs text-gray-400">(last 7d)</span></h3>
+          </div>
+          <div class="p-4 space-y-1.5 max-h-80 overflow-y-auto">
+            ${(r.activity_feed||[]).length ? (r.activity_feed||[]).slice(0,40).map(a => {
+              const icon = {login:'🔑',pipeline_run:'🤖'}[a.type]||'📌'
+              const statusColor = a.status==='failed'?'text-red-600':a.status==='running'?'text-blue-500':'text-green-600'
+              const who = a.user_name ? `<span class="font-medium text-gray-700">${esc(a.user_name)}</span>` : `<span class="text-gray-400">Pipeline</span>`
+              const detail = a.type==='login'
+                ? `logged in${a.ip_address?' from '+esc(a.ip_address):''}`
+                : `ran pipeline: <em>${esc(a.keyword||'')}</em>`
+              return `<div class="flex items-start gap-2 text-xs py-1 border-b border-gray-50">
+                <span class="text-base leading-none mt-0.5">${icon}</span>
+                <div class="flex-1 min-w-0">
+                  <span>${who} ${detail}</span>
+                  ${a.shop_domain ? `<span class="text-gray-400 ml-1">${esc(a.shop_domain.replace('.myshopify.com',''))}</span>` : ''}
+                </div>
+                <span class="text-gray-400 shrink-0">${fmtDate(a.created_at)}</span>
+                <span class="${statusColor} shrink-0">${a.status||''}</span>
+              </div>`
+            }).join('') :
+            '<div class="text-center text-gray-400 py-8">No activity recorded yet</div>'
+            }
+          </div>
+        </div>
+
+      </div>
+    </div>`
+  } catch(e) {
+    el.innerHTML = `<div class="card text-red-600 p-4">Failed to load report: ${esc(e.message)}</div>`
+  }
 }
 
 // ══════════════════════ USER MANAGEMENT ══════════════════════
