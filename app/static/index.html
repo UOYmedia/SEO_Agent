@@ -114,6 +114,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: rgb(55 65 81);
     <a class="nav-link hidden" id="kb-nav-link" data-page="knowledge" onclick="nav('knowledge')">🧠 Knowledge Base</a>
     <a class="nav-link" data-page="products"  onclick="nav('products')">🛍 Products KB</a>
     <a class="nav-link" data-page="brand"     onclick="nav('brand')">🎨 Brand Profile</a>
+    <a class="nav-link" data-page="social"    onclick="nav('social')">📲 Social Media</a>
     <div id="admin-nav" class="hidden">
       <div class="border-t border-indigo-900 my-2"></div>
       <a class="nav-link" data-page="users"    onclick="nav('users')">👥 Users</a>
@@ -261,7 +262,7 @@ function nav(page) {
     el.classList.toggle('active', el.dataset.page === page))
   const titles = { dashboard: 'Dashboard', posts: 'Blog Posts', research: 'Keyword Research', topics: 'Topic Clusters', generate: 'Generate Article', audit: 'SEO Audit', trends: 'Market Trends', pipeline: '🤖 AI Pipeline', knowledge: 'Knowledge Base', users: 'User Management', activity: '📊 Activity Report', brand: 'Brand Profile', products: 'Products KB' }
   document.getElementById('page-title').textContent = titles[page] || page
-  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, trends: renderTrends, pipeline: renderPipeline, knowledge: renderKnowledge, users: renderUsers, activity: renderActivity, brand: renderBrand, products: renderProducts }
+  const pages = { dashboard: renderDashboard, posts: renderPosts, research: renderResearch, topics: renderTopics, generate: renderGenerate, audit: renderAudit, trends: renderTrends, pipeline: renderPipeline, knowledge: renderKnowledge, users: renderUsers, activity: renderActivity, brand: renderBrand, products: renderProducts, social: renderSocial }
   pages[page]?.()
 }
 
@@ -689,6 +690,7 @@ async function loadPosts() {
                   <button class="btn btn-success btn-sm" onclick="openPublishModal(${p.id},'${esc(p.title)}')">Publish</button>
                   <button class="btn btn-secondary btn-sm" onclick="openScheduleModal(${p.id},'${esc(p.title)}',${JSON.stringify(p.shop_domain||'')},${JSON.stringify(p.scheduled_at||null)})">🕐 Schedule</button>
                 ` : ''}
+                <button class="btn btn-sm" style="background:#6366f1;color:white" onclick="shareToBlogSocial(${p.id},'${esc(p.shop_domain||S.currentShop||'')}')">📲 Share</button>
               </div>
             </td>
           </tr>`).join('')}
@@ -791,6 +793,7 @@ function _renderViewPost(id, p) {
       <button class="btn btn-success btn-sm" onclick="closeModal();openPublishModal(${id},'${esc(p.title)}')">🚀 Publish to Shopify</button>
       <button class="btn btn-secondary btn-sm" onclick="viewPostAuditFix(${id})">📊 Audit & Fix</button>
       <button class="btn btn-secondary btn-sm" onclick="editPost(${id})">📝 Edit</button>
+      <button class="btn btn-sm" style="background:#6366f1;color:white" onclick="shareToBlogSocial(${id},'${esc(p.shop_domain||S.currentShop||'')}')">📲 Share</button>
       <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5" onclick="confirmDeletePost(${id})">🗑 Delete</button>
     ` : ''}
     <button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>`
@@ -4107,7 +4110,8 @@ async function viewPipelineRun(runId) {
       </div>`,
       `<button class="btn btn-secondary btn-sm" onclick="closeModal()">Close</button>
        ${run.post_id ? `<button class="btn btn-secondary btn-sm" onclick="closeModal();editPost(${run.post_id})">📝 View &amp; Edit Draft</button>` : ''}
-       ${run.post_id ? `<button class="btn btn-primary btn-sm" onclick="closeModal();openPublishModal(${run.post_id},'')">🚀 Publish Article</button>` : ''}`
+       ${run.post_id ? `<button class="btn btn-primary btn-sm" onclick="closeModal();openPublishModal(${run.post_id},'')">🚀 Publish Article</button>` : ''}
+       ${run.post_id ? `<button class="btn btn-sm" style="background:#6366f1;color:white" onclick="closeModal();shareToBlogSocial(${run.post_id},'${esc(S.currentShop||'')}')">📲 Share to Social</button>` : ''}`
     )
   } catch(e) { toast('Failed to load run: ' + e.message, 'error') }
 }
@@ -5033,6 +5037,327 @@ async function gscDisconnect() {
     renderBrand()
     toast('GSC disconnected', 'success')
   } catch(e) { toast('Disconnect failed: ' + e.message, 'error') }
+}
+
+// ══════════════════════ SOCIAL MEDIA ══════════════════════
+
+const PLATFORM_COLORS = {
+  twitter:  '#000000', facebook: '#1877F2', pinterest: '#E60023',
+  threads:  '#101010', linkedin: '#0A66C2', tiktok:    '#010101', youtube:  '#FF0000'
+}
+const PLATFORM_ICONS = {
+  twitter: '𝕏', facebook: 'f', pinterest: 'P',
+  threads: '@', linkedin: 'in', tiktok: '♪', youtube: '▶'
+}
+const PLATFORM_NAMES = {
+  twitter: 'Twitter / X', facebook: 'Facebook', pinterest: 'Pinterest',
+  threads: 'Threads', linkedin: 'LinkedIn', tiktok: 'TikTok', youtube: 'YouTube'
+}
+
+async function renderSocial() {
+  const el = document.getElementById('content')
+  const shop = S.currentShop
+
+  document.getElementById('header-actions').innerHTML =
+    `<button class="btn btn-primary btn-sm" onclick="renderSocial()">🔄 Refresh</button>`
+
+  el.innerHTML = `<div class="flex items-center justify-center py-20"><div class="spinner-dark"></div></div>`
+
+  // Handle OAuth callback params
+  const params = new URLSearchParams(location.search)
+  if (params.get('page') === 'social') {
+    const platform   = params.get('oauth_platform')
+    const oauthStatus = params.get('oauth_status')
+    history.replaceState({}, '', '/?page=social')
+    if (platform && oauthStatus) {
+      if (oauthStatus === 'connected') toast(`${PLATFORM_NAMES[platform] || platform} connected!`, 'success')
+      else if (oauthStatus === 'select_page') { window._socialOAuthPlatform = platform; window._socialOAuthAccountId = params.get('account_id') }
+      else if (oauthStatus === 'select_board') { window._socialOAuthPlatform = platform; window._socialOAuthAccountId = params.get('account_id') }
+      else toast(`${PLATFORM_NAMES[platform] || platform} connection failed`, 'error')
+    }
+  }
+
+  try {
+    const [platforms, accounts] = await Promise.all([
+      GET('/api/v1/social/platforms'),
+      shop ? GET(`/api/v1/social/accounts?shop_domain=${encodeURIComponent(shop)}`) : Promise.resolve([])
+    ])
+
+    const connectedMap = {}
+    for (const a of accounts) connectedMap[a.platform] = a
+
+    let postHistory = []
+    try { postHistory = shop ? await GET(`/api/v1/social/posts?shop_domain=${encodeURIComponent(shop)}&limit=20`) : [] } catch {}
+
+    el.innerHTML = `
+<div class="space-y-6">
+
+  <!-- Header -->
+  <div class="card p-4">
+    <h2 class="text-lg font-bold text-gray-800 mb-1">📲 Social Media Integration</h2>
+    <p class="text-sm text-gray-500">Connect your brand's social accounts to auto-publish articles and build external SEO links.</p>
+    ${!shop ? '<p class="text-yellow-600 text-sm mt-2">⚠️ Select a store first to connect social accounts.</p>' : ''}
+  </div>
+
+  <!-- Platform Cards -->
+  <div>
+    <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Connected Accounts</h3>
+    <div class="grid grid-cols-1 gap-3" id="social-accounts-grid">
+      ${platforms.map(p => _renderPlatformCard(p, connectedMap[p.platform])).join('')}
+    </div>
+  </div>
+
+  <!-- Recent Posts -->
+  ${postHistory.length ? `
+  <div>
+    <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Recent Social Posts</h3>
+    <div class="card overflow-hidden">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b border-gray-100 text-xs text-gray-500">
+          <th class="text-left p-3">Platform</th>
+          <th class="text-left p-3">Article</th>
+          <th class="text-left p-3">Status</th>
+          <th class="text-left p-3">Published</th>
+          <th class="text-left p-3">Link</th>
+        </tr></thead>
+        <tbody>${postHistory.map(sp => `
+          <tr class="border-b border-gray-50 hover:bg-gray-50">
+            <td class="p-3">
+              <span class="inline-flex items-center gap-1">
+                <span style="color:${PLATFORM_COLORS[sp.platform]};font-weight:700">${PLATFORM_ICONS[sp.platform]||'•'}</span>
+                <span class="text-xs">${PLATFORM_NAMES[sp.platform]||sp.platform}</span>
+              </span>
+            </td>
+            <td class="p-3 text-xs text-gray-600 max-w-xs truncate">Post #${sp.blog_post_id||'-'}</td>
+            <td class="p-3">
+              <span class="px-2 py-0.5 rounded-full text-xs font-medium ${sp.status==='published'?'bg-green-100 text-green-700':sp.status==='failed'?'bg-red-100 text-red-700':'bg-yellow-100 text-yellow-700'}">
+                ${sp.status}
+              </span>
+            </td>
+            <td class="p-3 text-xs text-gray-400">${sp.published_at ? new Date(sp.published_at).toLocaleDateString() : '-'}</td>
+            <td class="p-3 text-xs">
+              ${sp.platform_post_url ? `<a href="${esc(sp.platform_post_url)}" target="_blank" class="text-indigo-500 hover:underline">View ↗</a>` :
+                sp.status==='failed' ? `<button class="text-xs text-indigo-500 hover:underline" onclick="retrySocialPost(${sp.id})">Retry</button>` : '-'}
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>` : ''}
+
+</div>`
+
+    // If OAuth just completed and needs config selection, show modal
+    if (window._socialOAuthPlatform) {
+      const p = window._socialOAuthPlatform
+      const acct = connectedMap[p] || accounts.find(a => a.id == window._socialOAuthAccountId)
+      window._socialOAuthPlatform = null
+      if (acct) setTimeout(() => openSocialConfigModal(acct, shop), 300)
+    }
+
+  } catch(e) {
+    el.innerHTML = `<div class="card text-red-600 p-4">Failed to load social media: ${esc(e.message)}</div>`
+  }
+}
+
+function _renderPlatformCard(p, account) {
+  const shop = S.currentShop
+  const connected = !!account
+  const color = PLATFORM_COLORS[p.platform]
+  const icon  = PLATFORM_ICONS[p.platform]
+  const name  = PLATFORM_NAMES[p.platform]
+  const needsConfig = connected && p.platform === 'facebook' && !account.extra_config?.page_id
+  const needsBoard  = connected && p.platform === 'pinterest' && !account.extra_config?.board_id
+  const configNote  = needsConfig ? '<span class="text-xs text-yellow-600">⚠️ Select a page</span>' :
+                      needsBoard  ? '<span class="text-xs text-yellow-600">⚠️ Select a board</span>' : ''
+
+  const configuredBadge = p.configured ? '' : '<span class="text-xs text-gray-400">(API keys not set)</span>'
+
+  return `<div class="card p-4 flex items-center gap-4">
+    <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-lg flex-shrink-0"
+         style="background:${color}">${icon}</div>
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2">
+        <span class="font-medium text-gray-800">${name}</span>
+        ${configuredBadge}
+        ${configNote}
+      </div>
+      ${connected ? `<div class="text-xs text-gray-500 mt-0.5">
+        ${account.avatar ? `<img src="${esc(account.avatar)}" class="inline w-4 h-4 rounded-full mr-1">` : ''}
+        @${esc(account.username || account.platform_user_id || 'connected')}
+        ${account.extra_config?.page_name ? ` · Page: ${esc(account.extra_config.page_name)}` : ''}
+        ${account.extra_config?.board_name ? ` · Board: ${esc(account.extra_config.board_name)}` : ''}
+      </div>` : '<div class="text-xs text-gray-400 mt-0.5">Not connected</div>'}
+    </div>
+    <div class="flex gap-2 flex-shrink-0">
+      ${connected && (needsConfig || needsBoard) ? `<button class="btn btn-sm" style="background:#f59e0b;color:white" onclick="openSocialConfigModal(${JSON.stringify(account).replace(/"/g,'&quot;')}, '${esc(shop||'')}')">Configure</button>` : ''}
+      ${connected ? `<button class="btn btn-sm bg-red-50 text-red-600 border border-red-200" onclick="disconnectSocial('${esc(p.platform)}')">Disconnect</button>` :
+        (shop && p.configured ? `<button class="btn btn-primary btn-sm" onclick="connectSocial('${esc(p.platform)}')">Connect</button>` :
+         `<button class="btn btn-sm text-gray-400" disabled>${!shop?'Select store':'Not configured'}</button>`)}
+    </div>
+  </div>`
+}
+
+function connectSocial(platform) {
+  const shop = S.currentShop
+  if (!shop) { toast('Select a store first', 'error'); return }
+  window.location.href = `/api/v1/social/oauth/${platform}/start?shop_domain=${encodeURIComponent(shop)}`
+}
+
+async function disconnectSocial(platform) {
+  const shop = S.currentShop
+  if (!confirm(`Disconnect ${PLATFORM_NAMES[platform]}?`)) return
+  try {
+    await api('DELETE', `/api/v1/social/accounts/${platform}?shop_domain=${encodeURIComponent(shop)}`)
+    toast(`${PLATFORM_NAMES[platform]} disconnected`, 'success')
+    renderSocial()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+function openSocialConfigModal(account, shop) {
+  const cfg   = account.extra_config || {}
+  const pages  = cfg.pages  || []
+  const boards = cfg.boards || []
+  const isFB   = account.platform === 'facebook'
+  const isPT   = account.platform === 'pinterest'
+
+  if (!isFB && !isPT) return
+
+  const options = isFB ? pages : boards
+  const label   = isFB ? 'Select Facebook Page to post to' : 'Select Pinterest Board for pins'
+  const valueKey = isFB ? 'id' : 'id'
+  const nameKey  = 'name'
+
+  const body = `<div class="space-y-4">
+    <p class="text-sm text-gray-600">${label}:</p>
+    <select id="social-cfg-select" class="input w-full">
+      ${options.map(o => `<option value="${esc(o[valueKey])}" data-name="${esc(o[nameKey])}" ${isFB ? `data-token="${esc(o.access_token||'')}"`:''}>
+        ${esc(o[nameKey])}
+      </option>`).join('')}
+    </select>
+  </div>`
+
+  const footer = `<button class="btn btn-primary" onclick="saveSocialConfig('${esc(account.platform)}', '${esc(shop)}', ${isFB})">Save</button>
+    <button class="btn ml-2" onclick="closeModal()">Cancel</button>`
+
+  openModal(label, body, footer)
+}
+
+async function saveSocialConfig(platform, shop, isFacebook) {
+  const sel  = document.getElementById('social-cfg-select')
+  const opt  = sel.selectedOptions[0]
+  const id   = sel.value
+  const name = opt.dataset.name
+  let extra  = {}
+  if (isFacebook) {
+    extra = { page_id: id, page_name: name, page_token: opt.dataset.token }
+  } else {
+    extra = { board_id: id, board_name: name }
+  }
+  try {
+    await POST('/api/v1/social/accounts/select-config', { shop_domain: shop, platform, extra_config: extra })
+    closeModal()
+    toast('Configuration saved', 'success')
+    renderSocial()
+  } catch(e) { toast('Failed: ' + e.message, 'error') }
+}
+
+async function retrySocialPost(socialPostId) {
+  try {
+    const r = await POST(`/api/v1/social/posts/${socialPostId}/retry`, {})
+    toast('Retried successfully', 'success')
+    renderSocial()
+  } catch(e) { toast('Retry failed: ' + e.message, 'error') }
+}
+
+// Share article to social platforms (called from blog post modal)
+async function shareToBlogSocial(blogPostId, shop) {
+  const platforms = await GET('/api/v1/social/platforms')
+  const accounts  = await GET(`/api/v1/social/accounts?shop_domain=${encodeURIComponent(shop)}`)
+  const connectedPlatforms = accounts.map(a => a.platform)
+
+  if (!connectedPlatforms.length) {
+    toast('No social accounts connected. Go to 📲 Social Media to connect.', 'error')
+    return
+  }
+
+  let previewData = null
+  let activePlatform = connectedPlatforms[0]
+
+  const renderPreviewPanel = async (platform) => {
+    activePlatform = platform
+    document.getElementById('social-share-preview').innerHTML =
+      `<div class="flex justify-center py-4"><div class="spinner-dark"></div></div>`
+    try {
+      previewData = await POST('/api/v1/social/preview', { blog_post_id: blogPostId, platform })
+      const col = PLATFORM_COLORS[platform]
+      document.getElementById('social-share-preview').innerHTML = `
+        <div class="border rounded-lg p-3" style="border-color:${col}20;background:${col}05">
+          <div class="text-xs text-gray-400 mb-1">${PLATFORM_NAMES[platform]} preview (${previewData.char_count} chars)</div>
+          <p class="text-sm text-gray-700 whitespace-pre-wrap">${esc(previewData.text)}</p>
+        </div>`
+    } catch(e) {
+      document.getElementById('social-share-preview').innerHTML = `<p class="text-red-500 text-sm">${esc(e.message)}</p>`
+    }
+  }
+
+  const body = `
+<div class="space-y-4">
+  <div>
+    <p class="text-sm font-medium text-gray-700 mb-2">Select platforms to share to:</p>
+    <div class="flex flex-wrap gap-2">
+      ${connectedPlatforms.map(p => `
+        <label class="flex items-center gap-1.5 cursor-pointer">
+          <input type="checkbox" class="social-share-cb" value="${esc(p)}" checked>
+          <span class="text-sm" style="color:${PLATFORM_COLORS[p]};font-weight:600">${PLATFORM_ICONS[p]} ${PLATFORM_NAMES[p]}</span>
+        </label>`).join('')}
+    </div>
+  </div>
+  <div>
+    <p class="text-sm font-medium text-gray-700 mb-2">Preview content for:</p>
+    <div class="flex flex-wrap gap-2 mb-3">
+      ${connectedPlatforms.map(p => `
+        <button onclick="(${renderPreviewPanel.toString()})('${p}')"
+          class="btn btn-sm text-white text-xs" style="background:${PLATFORM_COLORS[p]}">
+          ${PLATFORM_ICONS[p]} ${PLATFORM_NAMES[p]}
+        </button>`).join('')}
+    </div>
+    <div id="social-share-preview" class="min-h-20 bg-gray-50 rounded-lg p-3 text-sm text-gray-400 italic">
+      Click a platform above to preview AI-generated post.
+    </div>
+  </div>
+</div>`
+
+  const footer = `
+    <button class="btn btn-primary" onclick="executeShare(${blogPostId}, '${esc(shop)}')">🚀 Share Now</button>
+    <button class="btn ml-2" onclick="closeModal()">Cancel</button>`
+
+  openModal('📲 Share to Social Media', body, footer)
+}
+
+async function executeShare(blogPostId, shop) {
+  const cbs = document.querySelectorAll('.social-share-cb:checked')
+  const selectedPlatforms = Array.from(cbs).map(cb => cb.value)
+  if (!selectedPlatforms.length) { toast('Select at least one platform', 'error'); return }
+
+  const btn = document.querySelector('#modal-footer .btn-primary')
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publishing…' }
+
+  try {
+    const result = await POST('/api/v1/social/publish', {
+      blog_post_id: blogPostId,
+      shop_domain:  shop,
+      platforms:    selectedPlatforms,
+    })
+    closeModal()
+    const ok  = result.results.filter(r => r.status === 'published')
+    const err = result.results.filter(r => r.status === 'error')
+    if (ok.length)  toast(`Published to ${ok.map(r=>PLATFORM_NAMES[r.platform]).join(', ')}!`, 'success')
+    if (err.length) toast(`Failed: ${err.map(r=>r.platform+': '+r.error).join('; ')}`, 'error')
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '🚀 Share Now' }
+    toast('Share failed: ' + e.message, 'error')
+  }
 }
 
 // ══════════════════════ ACTIVITY REPORT ══════════════════════
