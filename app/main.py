@@ -67,18 +67,30 @@ async def lifespan(app: FastAPI):
 
 def _migrate_user_columns():
     """Add new columns to users table for deployments that pre-date them."""
-    from sqlalchemy import text
+    from sqlalchemy import inspect, text
     from app.database import engine
-    with engine.connect() as conn:
-        for col, typedef in [
-            ("last_login_at", "DATETIME"),
-            ("login_count",   "INTEGER DEFAULT 0"),
-        ]:
-            try:
+
+    try:
+        inspector = inspect(engine)
+        existing = {col["name"] for col in inspector.get_columns("users")}
+    except Exception:
+        existing = set()
+
+    ts_type = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+
+    for col, typedef in [
+        ("last_login_at", ts_type),
+        ("login_count",   "INTEGER DEFAULT 0"),
+    ]:
+        if col in existing:
+            continue
+        try:
+            with engine.connect() as conn:
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {typedef}"))
                 conn.commit()
-            except Exception:
-                pass  # column already exists
+            logger.info("Migration: added column users.%s", col)
+        except Exception as exc:
+            logger.warning("Migration: could not add column users.%s: %s", col, exc)
 
 
 def _bootstrap_superadmin():
