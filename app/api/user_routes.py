@@ -4,10 +4,13 @@ User management + auth endpoints.
 Bootstrap: first POST /api/v1/users/register creates an admin (no auth required).
 Subsequent registrations require admin token.
 """
+import logging
+from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -21,6 +24,44 @@ from app.services.auth_service import (
     require_admin,
     verify_password,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _log_activity(
+    db: Session,
+    *,
+    user_id: Optional[int],
+    action: str,
+    shop_domain: Optional[str] = None,
+    resource_type: Optional[str] = None,
+    resource_id: Optional[int] = None,
+    status: str = "success",
+    error_message: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    extra: Optional[dict] = None,
+) -> None:
+    """Insert a UserActivityLog row. Silently no-ops on any DB error."""
+    try:
+        from app.models.user_activity import UserActivityLog
+        db.add(UserActivityLog(
+            user_id=user_id,
+            shop_domain=shop_domain,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            status=status,
+            error_message=error_message,
+            ip_address=ip_address,
+            extra=extra,
+        ))
+        db.commit()
+    except Exception as exc:
+        logger.warning("_log_activity failed: %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
 user_router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
@@ -95,12 +136,31 @@ def register(body: RegisterBody, db: Session = Depends(get_db)):
 
 
 @user_router.post("/login")
-def login(body: LoginBody, db: Session = Depends(get_db)):
+def login(body: LoginBody, request: Request, db: Session = Depends(get_db)):
     user = db.query(User).filter_by(email=body.email).first()
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(401, "Invalid email or password")
     if not user.is_active:
         raise HTTPException(403, "Account disabled")
+
+    # Update login tracking
+    try:
+        user.last_login_at = datetime.utcnow()
+        user.login_count = (user.login_count or 0) + 1
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+    _log_activity(
+        db,
+        user_id=user.id,
+        action="login",
+        ip_address=request.client.host if request.client else None,
+    )
+
     token = create_access_token(user.id, user.email, user.role)
     return {"token": token, "user": _user_out(user, db)}
 
@@ -269,6 +329,168 @@ def store_keyword_suggestions(
         return generate_suggestions(store_posts, shop_domain)
     except Exception as e:
         raise HTTPException(502, f"Suggestion generation failed: {e}")
+
+
+# ── Admin: Activity Report ───────────────────────────────────────────────────
+
+@user_router.get("/admin/activity-report")
+def activity_report(
+    days: int = 30,
+    admin=Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Comprehensive user activity report for the super-admin dashboard."""
+    from app.models.blog_post import BlogPost
+    from app.models.pipeline_run import PipelineRun
+    from app.models.article_edit_history import ArticleEditHistory
+    from app.models.article_feedback import ArticleFeedback
+    from app.models.user_activity import UserActivityLog
+
+    since = datetime.utcnow() - timedelta(days=days)
+    since_7d = datetime.utcnow() - timedelta(days=7)
+
+    # ── Summary ──────────────────────────────────────────────────────────────
+    total_users   = db.query(func.count(User.id)).scalar() or 0
+    active_7d     = db.query(func.count(User.id)).filter(
+                        User.last_login_at >= since_7d).scalar() or 0
+    total_pipelines  = db.query(func.count(PipelineRun.id)).filter(
+                        PipelineRun.created_at >= since).scalar() or 0
+    failed_pipelines = db.query(func.count(PipelineRun.id)).filter(
+                        PipelineRun.created_at >= since,
+                        PipelineRun.status == "failed").scalar() or 0
+    total_articles   = db.query(func.count(BlogPost.id)).filter(
+                        BlogPost.created_at >= since,
+                        BlogPost.source == "generated").scalar() or 0
+
+    # ── Per-user stats ────────────────────────────────────────────────────────
+    users = db.query(User).order_by(User.last_login_at.desc().nullslast(), User.created_at.desc()).all()
+    user_rows = []
+    for u in users:
+        # stores this user can access
+        stores = (
+            ["*all*"] if u.role == "admin"
+            else [p.shop_domain for p in db.query(UserStorePermission).filter_by(user_id=u.id).all()]
+        )
+
+        # counts via shop_domain linkage
+        pipeline_count, pipeline_errors = 0, 0
+        article_count, published_count  = 0, 0
+        for shop in (stores if stores != ["*all*"] else
+                     [r[0] for r in db.query(PipelineRun.shop_domain).distinct()]):
+            pipeline_count  += db.query(func.count(PipelineRun.id)).filter(
+                PipelineRun.shop_domain == shop,
+                PipelineRun.created_at  >= since).scalar() or 0
+            pipeline_errors += db.query(func.count(PipelineRun.id)).filter(
+                PipelineRun.shop_domain == shop,
+                PipelineRun.status      == "failed",
+                PipelineRun.created_at  >= since).scalar() or 0
+            article_count   += db.query(func.count(BlogPost.id)).filter(
+                BlogPost.shop_domain == shop,
+                BlogPost.source      == "generated",
+                BlogPost.created_at  >= since).scalar() or 0
+            published_count += db.query(func.count(BlogPost.id)).filter(
+                BlogPost.shop_domain == shop,
+                BlogPost.source      == "generated",
+                BlogPost.status      == "published",
+                BlogPost.created_at  >= since).scalar() or 0
+
+        edits_count    = db.query(func.count(ArticleEditHistory.id)).filter(
+            ArticleEditHistory.user_id     == u.id,
+            ArticleEditHistory.created_at  >= since).scalar() or 0
+        feedback_count = db.query(func.count(ArticleFeedback.id)).filter(
+            ArticleFeedback.user_id    == u.id,
+            ArticleFeedback.created_at >= since).scalar() or 0
+        login_count_period = db.query(func.count(UserActivityLog.id)).filter(
+            UserActivityLog.user_id    == u.id,
+            UserActivityLog.action     == "login",
+            UserActivityLog.created_at >= since).scalar() or 0
+
+        user_rows.append({
+            "id":            u.id,
+            "name":          u.name,
+            "email":         u.email,
+            "role":          u.role,
+            "is_active":     u.is_active,
+            "created_at":    u.created_at,
+            "last_login_at": getattr(u, "last_login_at", None),
+            "login_count_total": getattr(u, "login_count", 0) or 0,
+            "login_count_period": login_count_period,
+            "stores":        stores,
+            "stats": {
+                "pipeline_runs":    pipeline_count,
+                "pipeline_errors":  pipeline_errors,
+                "articles_generated": article_count,
+                "articles_published": published_count,
+                "edits_made":       edits_count,
+                "feedback_given":   feedback_count,
+            },
+        })
+
+    # ── Recent errors ─────────────────────────────────────────────────────────
+    recent_errors = db.query(PipelineRun).filter(
+        PipelineRun.status == "failed",
+        PipelineRun.created_at >= since_7d,
+    ).order_by(PipelineRun.created_at.desc()).limit(20).all()
+
+    error_list = [{
+        "type":       "pipeline_run",
+        "id":         e.id,
+        "keyword":    e.keyword,
+        "shop_domain": e.shop_domain,
+        "error":      e.error or "Unknown error",
+        "created_at": e.created_at,
+    } for e in recent_errors]
+
+    # ── Recent activity feed (logins + pipeline events) ───────────────────────
+    recent_logs = db.query(UserActivityLog).filter(
+        UserActivityLog.created_at >= since_7d,
+    ).order_by(UserActivityLog.created_at.desc()).limit(50).all()
+
+    # Also include recent pipeline runs as activity
+    recent_pipelines = db.query(PipelineRun).filter(
+        PipelineRun.created_at >= since_7d,
+    ).order_by(PipelineRun.created_at.desc()).limit(30).all()
+
+    activity_feed = [
+        {
+            "type":        "login",
+            "user_id":     log.user_id,
+            "user_name":   next((u.name for u in users if u.id == log.user_id), "Unknown"),
+            "shop_domain": log.shop_domain,
+            "status":      log.status,
+            "ip_address":  log.ip_address,
+            "created_at":  log.created_at,
+        }
+        for log in recent_logs if log.action == "login"
+    ] + [
+        {
+            "type":        "pipeline_run",
+            "user_id":     None,
+            "user_name":   None,
+            "shop_domain": p.shop_domain,
+            "keyword":     p.keyword,
+            "status":      p.status,
+            "created_at":  p.created_at,
+        }
+        for p in recent_pipelines
+    ]
+    activity_feed.sort(key=lambda x: x["created_at"] or datetime.min, reverse=True)
+
+    return {
+        "period_days": days,
+        "generated_at": datetime.utcnow(),
+        "summary": {
+            "total_users":       total_users,
+            "active_last_7_days": active_7d,
+            "total_pipelines":   total_pipelines,
+            "failed_pipelines":  failed_pipelines,
+            "error_rate_pct":    round(failed_pipelines / total_pipelines * 100, 1) if total_pipelines else 0,
+            "total_articles":    total_articles,
+        },
+        "users":          user_rows,
+        "recent_errors":  error_list,
+        "activity_feed":  activity_feed[:60],
+    }
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
