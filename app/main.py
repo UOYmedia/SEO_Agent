@@ -15,6 +15,7 @@ from app.api.knowledge_routes import knowledge_router
 from app.api.tracking_routes import tracking_router
 from app.api.trends_routes import trends_router
 from app.api.agent_routes import agent_router
+from app.api.social_routes import social_router
 from app.api.product_routes import product_router
 from app.api.publish_routes import publish_router
 from app.api.settings_routes import settings_router
@@ -33,6 +34,7 @@ from app.models import platform_guideline as _pg   # ensure platform_guidelines 
 from app.models import keyword_follow as _kf       # ensure keyword_follows/keyword_history tables
 from app.models import pipeline_run as _pr        # ensure pipeline_runs table is registered
 from app.models import user_activity as _ual      # ensure user_activity_logs table is registered
+from app.models import social as _soc             # ensure social_accounts + social_posts tables
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +172,7 @@ app.include_router(knowledge_router)
 app.include_router(tracking_router)
 app.include_router(trends_router)
 app.include_router(agent_router)
+app.include_router(social_router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

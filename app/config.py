@@ -48,6 +48,28 @@ class Settings(BaseSettings):
     # Cloudinary
     CLOUDINARY_URL: str = ""
 
+    # Social Media OAuth credentials
+    # Twitter / X — https://developer.twitter.com/en/portal/projects-and-apps
+    TWITTER_CLIENT_ID: str = ""
+    TWITTER_CLIENT_SECRET: str = ""
+
+    # Facebook & Threads — https://developers.facebook.com/apps (same Meta App)
+    FACEBOOK_APP_ID: str = ""
+    FACEBOOK_APP_SECRET: str = ""
+
+    # Pinterest — https://developers.pinterest.com/apps/
+    PINTEREST_APP_ID: str = ""
+    PINTEREST_APP_SECRET: str = ""
+
+    # LinkedIn — https://www.linkedin.com/developers/apps
+    LINKEDIN_CLIENT_ID: str = ""
+    LINKEDIN_CLIENT_SECRET: str = ""
+
+    # TikTok — https://developers.tiktok.com/
+    TIKTOK_CLIENT_KEY: str = ""
+    TIKTOK_CLIENT_SECRET: str = ""
+    # YouTube uses existing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
+
     # Superadmin bootstrap (auto-created on first startup if set)
     ADMIN_EMAIL: str = ""
     ADMIN_PASSWORD: str = ""
