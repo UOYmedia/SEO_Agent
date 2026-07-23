@@ -288,6 +288,7 @@ def debug_config():
         "shopify_access_token": _set(settings.SHOPIFY_ACCESS_TOKEN),
         "shopify_api_version":  settings.SHOPIFY_API_VERSION,
         "openai_api_key":       _set(settings.OPENAI_API_KEY),
+        "openrouter_api_key":   _set(settings.OPENROUTER_API_KEY),
         "serper_api_key":       _set(settings.SERPER_API_KEY),
         "google_client_id":     _set(settings.GOOGLE_CLIENT_ID),
         "google_client_secret": _set(settings.GOOGLE_CLIENT_SECRET),

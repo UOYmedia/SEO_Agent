@@ -325,9 +325,9 @@ class PlanRequest(BaseModel):
 
 @audit_router.post("/plan")
 def generate_ranking_plan(body: PlanRequest, db: Session = Depends(get_db)):
-    """Use GPT-4o to generate a prioritized ranking improvement plan."""
-    from openai import OpenAI
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    """Generate a prioritized ranking improvement plan."""
+    from app.agents.base import get_client, get_model
+    client = get_client()
 
     posts_q = db.query(BlogPost)
     if body.shop_domain:
@@ -369,7 +369,7 @@ Return a JSON object with exactly these keys:
 Be specific and actionable. Base recommendations on actual ranking data."""
 
     resp = client.chat.completions.create(
-        model=settings.OPENAI_MODEL,
+        model=get_model("audit"),
         max_tokens=2500,
         response_format={"type": "json_object"},
         messages=[{"role": "user", "content": prompt}],

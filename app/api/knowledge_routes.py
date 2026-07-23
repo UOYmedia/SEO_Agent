@@ -414,14 +414,13 @@ def kb_stats(shop_domain: Optional[str] = None, db: Session = Depends(get_db)):
 
 @knowledge_router.post("/trend")
 async def research_trend(body: TrendRequest, db: Session = Depends(get_db)):
-    from app.config import settings
+    from app.agents.base import get_client, get_model
     from app.services.keyword_analyzer import KeywordAnalyzer
-    from openai import OpenAI
 
     analyzer = KeywordAnalyzer()
     research = await analyzer.research(body.seed_keyword, body.country, body.language)
 
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    client = get_client()
     prompt = f"""You are an SEO market researcher. Analyze keyword research data and extract actionable trend insights.
 
 Keyword: {body.seed_keyword}
@@ -439,7 +438,7 @@ Return JSON only:
 }}"""
 
     resp = client.chat.completions.create(
-        model=settings.OPENAI_MODEL,
+        model=get_model("audit"),
         max_tokens=800,
         response_format={"type": "json_object"},
         messages=[{"role": "user", "content": prompt}],
@@ -481,9 +480,8 @@ Return JSON only:
 async def analyze_rankings(
     body: AnalyzeRankingsRequest, db: Session = Depends(get_db)
 ):
-    from app.config import settings
+    from app.agents.base import get_client, get_model
     from app.models.blog_post import BlogPost
-    from openai import OpenAI
 
     if not body.rankings:
         raise HTTPException(422, "rankings required")
@@ -505,7 +503,7 @@ async def analyze_rankings(
             "approx_word_count": len((post.content_html or "").split()) if post else None,
         })
 
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    client = get_client()
     prompt = f"""You are an SEO analyst. Analyze keyword ranking data to extract content performance patterns.
 
 Data:
@@ -522,7 +520,7 @@ Return JSON only:
 }}"""
 
     resp = client.chat.completions.create(
-        model=settings.OPENAI_MODEL,
+        model=get_model("audit"),
         max_tokens=1000,
         response_format={"type": "json_object"},
         messages=[{"role": "user", "content": prompt}],
