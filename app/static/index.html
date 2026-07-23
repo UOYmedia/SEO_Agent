@@ -674,7 +674,7 @@ async function loadPosts() {
             <td class="py-3 pr-3">
               <div class="font-medium text-gray-800 truncate max-w-xs">${esc(p.title)}</div>
               ${p.scheduled_at
-                ? `<span class="text-xs text-amber-600">🕐 Scheduled: ${fmtDate(p.scheduled_at)}</span>`
+                ? `<span class="text-xs text-amber-600">🕐 Scheduled: ${fmtDate(p.scheduled_at + 'Z')}</span>`
                 : p.platform_url
                   ? `<a href="${esc(p.platform_url)}" target="_blank" class="text-xs text-indigo-500 hover:underline">View on store ↗</a>`
                   : `<span class="text-xs text-gray-300">Not published</span>`}
@@ -1442,12 +1442,13 @@ function openScheduleModal(postId, title, shopDomain, scheduledAt) {
     `<option value="${esc(c.platform_id)}">${esc(c.title)}</option>`).join('')
   const savedBlogId = localStorage.getItem(`seo_pref_blogid_${S.currentShop}`) || ''
 
-  // Default to tomorrow at 09:00 local time
+  // Default to tomorrow at 09:00 UTC
   const now = new Date()
-  now.setDate(now.getDate() + 1)
-  now.setHours(9, 0, 0, 0)
+  now.setUTCDate(now.getUTCDate() + 1)
+  now.setUTCHours(9, 0, 0, 0)
   const defaultDt = now.toISOString().slice(0, 16)
-  const currentDt = scheduledAt ? new Date(scheduledAt).toISOString().slice(0, 16) : defaultDt
+  // scheduledAt is already a naive UTC ISO string from the API — use it as-is
+  const currentDt = scheduledAt ? scheduledAt.slice(0, 16) : defaultDt
 
   openModal(`Schedule: ${title}`, `
     <div class="space-y-4">
@@ -1465,7 +1466,7 @@ function openScheduleModal(postId, title, shopDomain, scheduledAt) {
       </div>
       ${scheduledAt ? `
         <div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          Currently scheduled: ${fmtDateTime(scheduledAt)}
+          Currently scheduled: ${fmtDateTime(scheduledAt + 'Z')}
           <button class="ml-2 text-red-500 underline" onclick="cancelSchedule(${postId})">Cancel schedule</button>
         </div>` : ''}
     </div>`,
@@ -1484,7 +1485,7 @@ async function doSchedule(postId) {
 
   try {
     await POST(`/api/v1/publish/${postId}/schedule`, {
-      scheduled_at: new Date(dt).toISOString(),
+      scheduled_at: dt + ':00Z',
       shop_domain: S.currentShop || '',
       blog_id: blogId,
     })
