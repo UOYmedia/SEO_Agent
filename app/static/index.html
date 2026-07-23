@@ -688,7 +688,7 @@ async function loadPosts() {
                 <button class="btn btn-secondary btn-sm" onclick="viewPost(${p.id})">View</button>
                 ${p.status==='draft' ? `
                   <button class="btn btn-success btn-sm" onclick="openPublishModal(${p.id},'${esc(p.title)}')">Publish</button>
-                  <button class="btn btn-secondary btn-sm" onclick="openScheduleModal(${p.id},'${esc(p.title)}',${JSON.stringify(p.shop_domain||'')},${JSON.stringify(p.scheduled_at||null)})">🕐 Schedule</button>
+                  <button class="btn btn-secondary btn-sm" onclick="openScheduleModal(${p.id},'${esc(p.title)}',${esc(JSON.stringify(p.shop_domain||''))},${esc(JSON.stringify(p.scheduled_at||null))})">🕐 Schedule</button>
                 ` : ''}
                 <button class="btn btn-sm" style="background:#6366f1;color:white" onclick="shareToBlogSocial(${p.id},'${esc(p.shop_domain||S.currentShop||'')}')">📲 Share</button>
               </div>
