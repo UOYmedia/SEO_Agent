@@ -16,6 +16,15 @@ logger = logging.getLogger(__name__)
 UPLOADS_DIR = Path(__file__).resolve().parent.parent / "static" / "uploads"
 
 
+def persist_image_bytes(data: bytes) -> str | None:
+    """Persist raw image bytes; returns a public URL.
+
+    Tries Cloudinary first (if configured), falls back to /static/uploads.
+    Returns None only if both paths fail.
+    """
+    return ImageGenerator._upload_to_cloudinary(data) or ImageGenerator._save_png(data)
+
+
 class ImageGenerator:
     VALID_SIZES = {"1024x1024", "1536x1024", "1024x1536", "auto"}
 

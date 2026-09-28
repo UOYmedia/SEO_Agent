@@ -3,6 +3,10 @@ Publish AI-generated articles to Shopify via Admin GraphQL API.
 REST /articles.json is deprecated in 2025-07+; this uses articleCreate/articleUpdate mutations.
 Image is passed as a URL (DALL-E temp URL) — Shopify fetches and hosts it.
 """
+import base64
+import binascii
+import logging
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -12,29 +16,42 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.blog_post import BlogPost, PostStatus
 
+logger = logging.getLogger(__name__)
 
-_ARTICLE_CREATE = """
-mutation ArticleCreate($article: ArticleCreateInput!) {
-  articleCreate(article: $article) {
-    article {
-      id handle onlineStoreUrl
-      image { url altText }
-    }
-    userErrors { field message }
-  }
+# Shopify's articleCreate/articleUpdate cap is 1 MB for `body`.
+# Leave a 50 KB safety margin for transport overhead.
+_BODY_MAX_BYTES = 1_000_000
+_BODY_WARN_BYTES = 950_000
+
+_DATA_IMG_RE = re.compile(
+    r'<img\b[^>]*\bsrc="(data:image/[a-zA-Z0-9.+-]+;base64,([^"]+))"[^>]*>',
+    re.IGNORECASE,
+)
+
+
+_ARTICLE_FIELDS = """
+article {
+  id
+  handle
+  image { url altText }
 }
+userErrors { field message }
 """
 
-_ARTICLE_UPDATE = """
-mutation ArticleUpdate($id: ID!, $article: ArticleUpdateInput!) {
-  articleUpdate(id: $id, article: $article) {
-    article {
-      id handle onlineStoreUrl
-      image { url altText }
-    }
-    userErrors { field message }
-  }
-}
+_ARTICLE_CREATE = f"""
+mutation ArticleCreate($article: ArticleCreateInput!) {{
+  articleCreate(article: $article) {{
+    {_ARTICLE_FIELDS}
+  }}
+}}
+"""
+
+_ARTICLE_UPDATE = f"""
+mutation ArticleUpdate($id: ID!, $article: ArticleUpdateInput!) {{
+  articleUpdate(id: $id, article: $article) {{
+    {_ARTICLE_FIELDS}
+  }}
+}}
 """
 
 
@@ -61,6 +78,46 @@ class ShopifyPublisher:
             "X-Shopify-Access-Token": self.access_token,
             "Content-Type": "application/json",
         }
+
+    @staticmethod
+    def _sanitize_body(body: str) -> str:
+        """Strip inline base64 images and check size before sending to Shopify.
+
+        Shopify's `body` field is hard-capped at 1 MB. Pasted/inline
+        `data:image/...;base64,...` URIs blow past that quickly, so we
+        upload them to Cloudinary/static and rewrite the `src` to a URL.
+        Raises ValueError with diagnostic info if the body is still too big.
+        """
+        if not body:
+            return ""
+
+        from app.services.image_generator import persist_image_bytes
+
+        def _replace(match: "re.Match[str]") -> str:
+            full_tag = match.group(0)
+            b64 = match.group(2)
+            try:
+                data = base64.b64decode(b64, validate=False)
+            except (binascii.Error, ValueError):
+                return full_tag  # leave as-is, size check will catch it
+            hosted = persist_image_bytes(data)
+            if not hosted:
+                return full_tag
+            absolute = ShopifyPublisher._absolute_url(hosted) or hosted
+            return re.sub(r'src="[^"]*"', f'src="{absolute}"', full_tag, count=1)
+
+        sanitized = _DATA_IMG_RE.sub(_replace, body)
+
+        size = len(sanitized.encode("utf-8"))
+        if size > _BODY_MAX_BYTES:
+            raise ValueError(
+                f"Article body is {size:,} bytes — exceeds Shopify's 1 MB limit. "
+                f"After stripping inline base64 images it is still too large. "
+                f"Shorten the content or split into multiple posts."
+            )
+        if size > _BODY_WARN_BYTES:
+            logger.warning("Shopify body close to 1 MB limit: %d bytes", size)
+        return sanitized
 
     @staticmethod
     def _absolute_url(url: str) -> Optional[str]:
@@ -112,6 +169,8 @@ class ShopifyPublisher:
                 )
             image_input = {"url": absolute_url, "altText": (image_alt or post.title)[:512]}
 
+        body_html = self._sanitize_body(post.content_html or "")
+
         # ── UPDATE existing article ──────────────────────────────────────────
         if post.platform_id:
             gid = (
@@ -121,7 +180,7 @@ class ShopifyPublisher:
             )
             update_input: dict = {
                 "title":       post.title,
-                "body":        post.content_html or "",
+                "body":        body_html,
                 "summary":     post.excerpt_html or "",
                 "author":      {"name": author},
                 "tags":        post.tags or [],
@@ -140,7 +199,7 @@ class ShopifyPublisher:
         create_input: dict = {
             "blogId":      f"gid://shopify/Blog/{blog_id}",
             "title":       post.title,
-            "body":        post.content_html or "",
+            "body":        body_html,
             "summary":     post.excerpt_html or "",
             "author":      {"name": author},
             "tags":        post.tags or [],
@@ -170,10 +229,7 @@ class ShopifyPublisher:
 
         post.platform_id = numeric_id
         post.shop_domain = self.shop_domain
-        post.platform_url = (
-            shopify_article.get("onlineStoreUrl")
-            or f"https://{self.shop_domain}/blogs/{blog_handle}/{handle}"
-        )
+        post.platform_url = f"https://{self.shop_domain}/blogs/{blog_handle}/{handle}"
         post.status = PostStatus.PUBLISHED
         post.published_at = datetime.utcnow()
 
