@@ -105,8 +105,12 @@ def _bootstrap_superadmin():
     from app.services.auth_service import hash_password
     db = SessionLocal()
     try:
-        if db.query(User).count() > 0:
-            return  # users already exist, skip
+        #if db.query(User).count() > 0:
+            #return  # users already exist, skip
+        #tạo acc admin
+        if db.query(User).filter_by(email=settings.ADMIN_EMAIL).first():
+            return  # account already exists, skip
+            
         admin = User(
             email=settings.ADMIN_EMAIL,
             name=settings.ADMIN_NAME or "Super Admin",
