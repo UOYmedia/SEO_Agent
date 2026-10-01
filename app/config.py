@@ -56,7 +56,8 @@ class Settings(BaseSettings):
     # Facebook & Threads — https://developers.facebook.com/apps (same Meta App)
     FACEBOOK_APP_ID: str = ""
     FACEBOOK_APP_SECRET: str = ""
-
+    FACEBOOK_CONFIG_ID_MT: str = ""  # Facebook Login for Business configuration ID (optional)
+    
     # Pinterest — https://developers.pinterest.com/apps/
     PINTEREST_APP_ID: str = ""
     PINTEREST_APP_SECRET: str = ""
