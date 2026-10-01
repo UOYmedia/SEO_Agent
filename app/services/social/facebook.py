@@ -18,16 +18,28 @@ def _redirect_uri() -> str:
     return f"{settings.APP_URL}/api/v1/social/oauth/facebook/callback"
 
 
+# def get_auth_url(shop_domain: str) -> str:
+   # state = generate_oauth_state("facebook", shop_domain)
+    #return f"{_AUTH_URL}?" + urlencode({
+      #  "client_id":    settings.FACEBOOK_APP_ID,
+     #   "redirect_uri": _redirect_uri(),
+     #   "scope":        _SCOPES,
+   #     "state":        state,
+ #   })
 def get_auth_url(shop_domain: str) -> str:
     state = generate_oauth_state("facebook", shop_domain)
-    return f"{_AUTH_URL}?" + urlencode({
+    params = {
         "client_id":    settings.FACEBOOK_APP_ID,
         "redirect_uri": _redirect_uri(),
-        "scope":        _SCOPES,
         "state":        state,
-    })
-
-
+    }
+    # Facebook Login for Business: permissions come from the configuration, not `scope`
+    if settings.FACEBOOK_CONFIG_ID_MT:
+        params["config_id"] = settings.FACEBOOK_CONFIG_ID_MT
+    else:
+        params["scope"] = _SCOPES
+    return f"{_AUTH_URL}?" + urlencode(params)
+    
 async def exchange_code(code: str, state: str) -> dict:
     entry = consume_oauth_state(state)
     if not entry:
