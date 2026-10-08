@@ -2,6 +2,7 @@
 
 OAuth connect/disconnect, content publishing, post history.
 """
+import json
 import logging
 from datetime import datetime
 from typing import Optional
@@ -37,6 +38,19 @@ def _account_dict(a: SocialAccount) -> dict:
         "is_active":        a.is_active,
         "connected_at":     a.created_at.isoformat() if a.created_at else None,
     }
+
+
+def _post_keywords(post: BlogPost) -> list[str]:
+    """focus_keyword + semantic_keywords; synced posts may store the latter as a string."""
+    sk = post.semantic_keywords or []
+    if isinstance(sk, str):
+        try:
+            parsed = json.loads(sk)
+        except ValueError:
+            parsed = sk.split(",")
+        sk = parsed if isinstance(parsed, list) else [str(parsed)]
+    kws = [post.focus_keyword] if post.focus_keyword else []
+    return kws + [str(k).strip() for k in sk if str(k).strip()]
 
 
 def _get_platform_module(platform: str):
@@ -434,7 +448,7 @@ async def preview_post(body: PreviewBody, db: Session = Depends(get_db)):
         title=post.title,
         content_html=post.content_html or "",
         article_url=article_url,
-        keywords=([post.focus_keyword] if post.focus_keyword else []) + (post.semantic_keywords or []),
+        keywords=_post_keywords(post),
         image_url=post.featured_image_url,
     )
     return result
@@ -455,7 +469,7 @@ async def publish_to_social(body: PublishBody, db: Session = Depends(get_db)):
         raise HTTPException(404, "Blog post not found")
 
     article_url = post.platform_url or f"https://{post.shop_domain}/blogs/news/{post.slug or post.id}"
-    keywords = ([post.focus_keyword] if post.focus_keyword else []) + (post.semantic_keywords or [])
+    keywords = _post_keywords(post)
 
     results = []
     for platform in body.platforms:
@@ -628,7 +642,7 @@ async def retry_social_post(social_post_id: int, db: Session = Depends(get_db)):
         raise HTTPException(400, f"{sp.platform} account not connected")
 
     article_url = blog_post.platform_url or f"https://{sp.shop_domain}/blogs/news/{blog_post.slug or blog_post.id}"
-    keywords = ([blog_post.focus_keyword] if blog_post.focus_keyword else []) + (blog_post.semantic_keywords or [])
+    keywords = _post_keywords(blog_post)
 
     try:
         account = await _ensure_fresh_token(account, db)
