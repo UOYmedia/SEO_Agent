@@ -17,7 +17,7 @@ _ARTICLE_CREATE = """
 mutation ArticleCreate($article: ArticleCreateInput!) {
   articleCreate(article: $article) {
     article {
-      id handle onlineStoreUrl
+      id handle 
       image { url altText }
     }
     userErrors { field message }
@@ -29,7 +29,7 @@ _ARTICLE_UPDATE = """
 mutation ArticleUpdate($id: ID!, $article: ArticleUpdateInput!) {
   articleUpdate(id: $id, article: $article) {
     article {
-      id handle onlineStoreUrl
+      id handle 
       image { url altText }
     }
     userErrors { field message }
