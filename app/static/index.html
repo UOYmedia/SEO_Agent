@@ -5281,26 +5281,6 @@ async function shareToBlogSocial(blogPostId, shop) {
     return
   }
 
-  let previewData = null
-  let activePlatform = connectedPlatforms[0]
-
-  const renderPreviewPanel = async (platform) => {
-    activePlatform = platform
-    document.getElementById('social-share-preview').innerHTML =
-      `<div class="flex justify-center py-4"><div class="spinner-dark"></div></div>`
-    try {
-      previewData = await POST('/api/v1/social/preview', { blog_post_id: blogPostId, platform })
-      const col = PLATFORM_COLORS[platform]
-      document.getElementById('social-share-preview').innerHTML = `
-        <div class="border rounded-lg p-3" style="border-color:${col}20;background:${col}05">
-          <div class="text-xs text-gray-400 mb-1">${PLATFORM_NAMES[platform]} preview (${previewData.char_count} chars)</div>
-          <p class="text-sm text-gray-700 whitespace-pre-wrap">${esc(previewData.text)}</p>
-        </div>`
-    } catch(e) {
-      document.getElementById('social-share-preview').innerHTML = `<p class="text-red-500 text-sm">${esc(e.message)}</p>`
-    }
-  }
-
   const body = `
 <div class="space-y-4">
   <div>
@@ -5317,7 +5297,7 @@ async function shareToBlogSocial(blogPostId, shop) {
     <p class="text-sm font-medium text-gray-700 mb-2">Preview content for:</p>
     <div class="flex flex-wrap gap-2 mb-3">
       ${connectedPlatforms.map(p => `
-        <button onclick="(${renderPreviewPanel.toString()})('${p}')"
+        <button onclick="previewSocialPost(${blogPostId}, '${esc(p)}')"
           class="btn btn-sm text-white text-xs" style="background:${PLATFORM_COLORS[p]}">
           ${PLATFORM_ICONS[p]} ${PLATFORM_NAMES[p]}
         </button>`).join('')}
@@ -5333,6 +5313,22 @@ async function shareToBlogSocial(blogPostId, shop) {
     <button class="btn ml-2" onclick="closeModal()">Cancel</button>`
 
   openModal('📲 Share to Social Media', body, footer)
+}
+
+async function previewSocialPost(blogPostId, platform) {
+  const el = document.getElementById('social-share-preview')
+  el.innerHTML = `<div class="flex justify-center py-4"><div class="spinner-dark"></div></div>`
+  try {
+    const previewData = await POST('/api/v1/social/preview', { blog_post_id: blogPostId, platform })
+    const col = PLATFORM_COLORS[platform]
+    el.innerHTML = `
+      <div class="border rounded-lg p-3" style="border-color:${col}20;background:${col}05">
+        <div class="text-xs text-gray-400 mb-1">${PLATFORM_NAMES[platform]} preview (${previewData.char_count} chars)</div>
+        <p class="text-sm text-gray-700 whitespace-pre-wrap">${esc(previewData.text)}</p>
+      </div>`
+  } catch(e) {
+    el.innerHTML = `<p class="text-red-500 text-sm">${esc(e.message)}</p>`
+  }
 }
 
 async function executeShare(blogPostId, shop) {
